@@ -13,16 +13,16 @@ func NewRouter(app *app.App) http.Handler {
 	h := handlers.NewHandler(app)
 	r := mux.NewRouter()
 
-	r.HandleFunc("/health", h.Health).Methods("GET")
-	r.HandleFunc("/test", h.Test).Methods("GET", "POST")
-	r.HandleFunc("/login", h.Login).Methods("POST")
-
-	// r.HandleFunc("/login", h.Login).Methods("POST")
+	api := r.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/login", h.Login).Methods("POST")
+	api.HandleFunc("/createuser", h.CreateUser).Methods("POST")
+	api.HandleFunc("/health", h.Health).Methods("GET")
+	api.HandleFunc("/test", h.Test).Methods("GET", "POST")
 
 	protected := r.PathPrefix("/api").Subrouter()
 	protected.Use(middleware.JWTMiddleware(h))
-	protected.HandleFunc("/health", h.Health).Methods("GET")
+	protected.HandleFunc("/users/me", h.GetMeRedirect).Methods("GET")
 	protected.HandleFunc("/users/{id}", h.GetUser).Methods("GET")
-	protected.HandleFunc("/users", h.Users).Methods("GET", "POST")
+	protected.HandleFunc("/users", h.Users).Methods("GET")
 	return r
 }

@@ -2,15 +2,11 @@ package middleware
 
 import (
 	"context"
+	"db-api-test-server/internal/api/contextkeys"
+	"db-api-test-server/internal/api/handlers"
 	"net/http"
 	"strings"
-
-	"db-api-test-server/internal/api/handlers"
 )
-
-type contextKey string
-
-const userIDKey contextKey = "userID"
 
 func JWTMiddleware(h *handlers.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -34,8 +30,7 @@ func JWTMiddleware(h *handlers.Handler) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Attach user ID to request context
-			ctx := context.WithValue(r.Context(), userIDKey, claims.UserID)
+			ctx := context.WithValue(r.Context(), contextkeys.UserID, claims.UserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

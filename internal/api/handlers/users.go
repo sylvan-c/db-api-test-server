@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"db-api-test-server/internal/api/contextkeys"
 	"db-api-test-server/internal/app"
 	"encoding/json"
 	"fmt"
@@ -15,8 +16,6 @@ func (h *Handler) Users(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.listUsers(w, r)
-	case http.MethodPost:
-		h.createUser(w, r)
 	default:
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
@@ -31,7 +30,7 @@ func (h *Handler) listUsers(w http.ResponseWriter, _ *http.Request) {
 	respondJSON(w, usersList, http.StatusOK)
 }
 
-func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req app.CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
@@ -75,4 +74,22 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, user, http.StatusOK)
+}
+
+func (h *Handler) GetMeRedirect(w http.ResponseWriter, r *http.Request) {
+	idVal := r.Context().Value(contextkeys.UserID)
+	if idVal == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, ok := idVal.(int)
+	if !ok {
+		http.Error(w, "invalid user id type", http.StatusInternalServerError)
+		return
+	}
+
+	redirectURL := fmt.Sprintf("/api/users/%d", userID)
+
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
