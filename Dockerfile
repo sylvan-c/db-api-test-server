@@ -1,5 +1,5 @@
 # Use Go official image
-FROM golang:1.21-alpine
+FROM golang:1.24-alpine
 
 # Set working dir
 WORKDIR /app
@@ -12,7 +12,7 @@ RUN go mod download
 COPY . .
 
 # Build the app
-RUN go build -o main .
+RUN go build -o main ./cmd/server/
 
 # Expose port
 EXPOSE 8080

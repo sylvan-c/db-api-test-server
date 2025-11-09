@@ -17,7 +17,7 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getTest(w http.ResponseWriter, _ *http.Request) {
-	rows, err := h.DB.Query("SELECT test_column FROM test_table")
+	rows, err := h.App.DB.Query("SELECT test_column FROM test_table")
 	if err != nil {
 		http.Error(w, "Failed to query test table", http.StatusInternalServerError)
 		return
@@ -64,7 +64,7 @@ func (h *Handler) postTest(w http.ResponseWriter, r *http.Request) {
 
 	// Insert into DB
 	var id int
-	err := h.DB.QueryRow(
+	err := h.App.DB.QueryRow(
 		"INSERT INTO test_table (test_column) VALUES ($1) RETURNING id",
 		req.TestColumn,
 	).Scan(&id)
