@@ -18,6 +18,7 @@ CREATE TABLE user_details (
 CREATE TABLE refresh_tokens (
   id SERIAL PRIMARY KEY,
   user_id INT NOT NULL REFERENCES users(id),
+  device_uuid TEXT NOT NULL,
   token TEXT NOT NULL UNIQUE,
   expiry_tst TIMESTAMP NOT NULL,
   revoked BOOLEAN DEFAULT FALSE,

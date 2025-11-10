@@ -9,8 +9,9 @@ import (
 )
 
 type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	DeviceUUID string `json:"deviceUUID"`
 }
 
 type refreshRequest struct {
@@ -20,6 +21,7 @@ type refreshRequest struct {
 type loginResponse struct {
 	AccessToken  string `json:"accessToken,omitempty"`
 	RefreshToken string `json:"refreshToken,omitempty"`
+	DeviceUUID   string `json:"deviceUUID,omitempty"`
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +42,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deviceUUID := req.DeviceUUID
+	if deviceUUID == "" {
+		deviceUUID = h.App.GenerateDeviceUUID()
+	}
+
 	userID, err := h.App.AuthenticateUser(req.Username, req.Password)
 	if errors.Is(err, app.ErrInvalidCredentials) {
 		respondJSON(w, loginResponse{}, http.StatusUnauthorized)
@@ -54,13 +61,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
 		return
 	}
-	refreshToken, err := h.App.GenerateRefreshToken(userID)
+	refreshToken, err := h.App.GenerateRefreshToken(userID, deviceUUID)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
 		return
 	}
-	respondJSON(w, loginResponse{AccessToken: accessToken, RefreshToken: refreshToken}, http.StatusOK)
+	respondJSON(w, loginResponse{AccessToken: accessToken, RefreshToken: refreshToken, DeviceUUID: deviceUUID}, http.StatusOK)
 }
 
 func (h *Handler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +98,23 @@ func (h *Handler) LogOut(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to revoke refresh token", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, nil, http.StatusOK)
+}
+
+func (h *Handler) LogOutAll(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	err := h.App.RevokeAllRefreshTokens(req.RefreshToken)
+	if err != nil {
+		log.Printf("%v", err.Error())
+		http.Error(w, "failed to revoke refresh tokens", http.StatusInternalServerError)
 		return
 	}
 

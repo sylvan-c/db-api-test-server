@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"log"
+
+	"github.com/google/uuid"
 )
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
@@ -38,27 +40,14 @@ func (a *App) hashToken(token string) string {
 	return base64.URLEncoding.EncodeToString(sum[:])
 }
 
-func (a *App) GenerateRefreshToken(userID int) (string, error) {
+func (a *App) GenerateRefreshToken(userID int, deviceUUID string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	tx, err := a.DB.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
-	var refreshTokenID int
-	err = a.DB.QueryRow(`INSERT INTO refresh_tokens (user_id, token, expiry_tst, revoked) VALUES ($1, $2, now()+INTERVAL '30 days', false) RETURNING id`, userID, a.hashToken(token)).
-		Scan(&refreshTokenID)
-	if err != nil {
-		return "", err
-	}
-
-	res, err := a.DB.Exec(`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 and id != $2`, userID, refreshTokenID)
+	res, err := a.DB.Exec(`INSERT INTO refresh_tokens (user_id, device_uuid, token, expiry_tst, revoked) VALUES ($1, $2, $3, now()+INTERVAL '30 days', false)`, userID, deviceUUID, a.hashToken(token))
 	if err != nil {
 		return "", err
 	}
@@ -66,12 +55,7 @@ func (a *App) GenerateRefreshToken(userID int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	log.Printf("%d rows updated", count)
-
-	err = tx.Commit()
-	if err != nil {
-		return "", err
-	}
+	log.Printf("%d rows inserted", count)
 
 	return token, nil
 }
@@ -111,4 +95,26 @@ func (a *App) RevokeRefreshToken(refreshToken string) error {
 	}
 	log.Printf("%d rows updated", count)
 	return nil
+}
+
+func (a *App) RevokeAllRefreshTokens(refreshToken string) error {
+	userID, err := a.getUserIDForRefreshToken(refreshToken)
+	if err != nil {
+		return err
+	}
+
+	res, err := a.DB.Exec(`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`, userID)
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	log.Printf("%d rows updated", count)
+	return nil
+}
+
+func (a *App) GenerateDeviceUUID() string {
+	return uuid.New().String()
 }

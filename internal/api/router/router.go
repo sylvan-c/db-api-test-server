@@ -18,6 +18,7 @@ func NewRouter(app *app.App) http.Handler {
 	api.HandleFunc("/createuser", h.CreateUser).Methods("POST")
 	api.HandleFunc("/refresh", h.RefreshAccessToken).Methods("POST")
 	api.HandleFunc("/logout", h.LogOut).Methods("POST")
+	api.HandleFunc("/logout/all", h.LogOutAll).Methods("POST")
 	api.HandleFunc("/health", h.Health).Methods("GET")
 	api.HandleFunc("/test", h.Test).Methods("GET", "POST")
 
