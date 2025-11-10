@@ -78,7 +78,7 @@ func (a *App) GenerateRefreshToken(userID int) (string, error) {
 
 func (a *App) getUserIDForRefreshToken(refreshToken string) (int, error) {
 	var userID int
-	err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token = $1 and (not revoked or expiry_tst > now())`, a.hashToken(refreshToken)).
+	err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.hashToken(refreshToken)).
 		Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrInvalidRefreshToken
@@ -98,4 +98,17 @@ func (a *App) RefreshAccessToken(refreshToken string) (string, error) {
 		return "", nil
 	}
 	return accessToken, nil
+}
+
+func (a *App) RevokeRefreshToken(refreshToken string) error {
+	res, err := a.DB.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token = $1`, a.hashToken(refreshToken))
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	log.Printf("%d rows updated", count)
+	return nil
 }

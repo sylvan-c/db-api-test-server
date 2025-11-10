@@ -79,3 +79,20 @@ func (h *Handler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, loginResponse{AccessToken: accessToken}, http.StatusOK)
 }
+
+func (h *Handler) LogOut(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	err := h.App.RevokeRefreshToken(req.RefreshToken)
+	if err != nil {
+		log.Printf("%v", err.Error())
+		http.Error(w, "failed to revoke refresh token", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, nil, http.StatusOK)
+}

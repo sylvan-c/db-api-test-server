@@ -17,6 +17,7 @@ func NewRouter(app *app.App) http.Handler {
 	api.HandleFunc("/login", h.Login).Methods("POST")
 	api.HandleFunc("/createuser", h.CreateUser).Methods("POST")
 	api.HandleFunc("/refresh", h.RefreshAccessToken).Methods("POST")
+	api.HandleFunc("/logout", h.LogOut).Methods("POST")
 	api.HandleFunc("/health", h.Health).Methods("GET")
 	api.HandleFunc("/test", h.Test).Methods("GET", "POST")
 
@@ -25,5 +26,6 @@ func NewRouter(app *app.App) http.Handler {
 	protected.HandleFunc("/users/me", h.GetMeRedirect).Methods("GET")
 	protected.HandleFunc("/users/{id}", h.GetUser).Methods("GET")
 	protected.HandleFunc("/users", h.Users).Methods("GET")
+
 	return r
 }
