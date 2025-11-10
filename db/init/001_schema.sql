@@ -14,3 +14,14 @@ CREATE TABLE user_details (
   last_name TEXT NOT NULL,
   tst TIMESTAMP DEFAULT now()
 );
+
+CREATE TABLE refresh_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id),
+  token TEXT NOT NULL UNIQUE,
+  expiry_tst TIMESTAMP NOT NULL,
+  revoked BOOLEAN DEFAULT FALSE,
+  tst TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_refresh_tokens_token ON refresh_tokens(token);

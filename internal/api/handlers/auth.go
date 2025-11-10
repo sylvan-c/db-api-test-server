@@ -4,6 +4,7 @@ import (
 	"db-api-test-server/internal/app"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 )
 
@@ -12,10 +13,13 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
 type loginResponse struct {
-	Token   string `json:"token,omitempty"`
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
+	AccessToken  string `json:"accessToken,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -38,17 +42,40 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := h.App.AuthenticateUser(req.Username, req.Password)
 	if errors.Is(err, app.ErrInvalidCredentials) {
-		respondJSON(w, loginResponse{Success: false, Message: "invalid credentials"}, http.StatusUnauthorized)
+		respondJSON(w, loginResponse{}, http.StatusUnauthorized)
 		return
 	} else if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	token, err := h.App.Auth.GenerateToken(userID)
+	accessToken, err := h.App.Auth.GenerateAccessToken(userID)
 	if err != nil {
-		http.Error(w, "failed to generate token", http.StatusInternalServerError)
+		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
 		return
 	}
-	respondJSON(w, loginResponse{Token: token, Success: true, Message: "password verified"}, http.StatusOK)
+	refreshToken, err := h.App.GenerateRefreshToken(userID)
+	if err != nil {
+		log.Printf("%v", err.Error())
+		http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, loginResponse{AccessToken: accessToken, RefreshToken: refreshToken}, http.StatusOK)
+}
+
+func (h *Handler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	accessToken, err := h.App.RefreshAccessToken(req.RefreshToken)
+	if err != nil {
+		log.Printf("%v", err.Error())
+		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, loginResponse{AccessToken: accessToken}, http.StatusOK)
 }

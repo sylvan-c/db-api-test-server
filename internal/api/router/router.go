@@ -16,6 +16,7 @@ func NewRouter(app *app.App) http.Handler {
 	api := r.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/login", h.Login).Methods("POST")
 	api.HandleFunc("/createuser", h.CreateUser).Methods("POST")
+	api.HandleFunc("/refresh", h.RefreshAccessToken).Methods("POST")
 	api.HandleFunc("/health", h.Health).Methods("GET")
 	api.HandleFunc("/test", h.Test).Methods("GET", "POST")
 

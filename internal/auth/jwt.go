@@ -19,11 +19,11 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func (j *JWTService) GenerateToken(userID int) (string, error) {
+func (j *JWTService) GenerateAccessToken(userID int) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // 1 day expiry
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -32,7 +32,7 @@ func (j *JWTService) GenerateToken(userID int) (string, error) {
 	return token.SignedString(j.secret)
 }
 
-func (j *JWTService) ValidateToken(tokenStr string) (*Claims, error) {
+func (j *JWTService) ValidateAccessToken(tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
 		// Ensure token was signed with HMAC (HS256)
 		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
