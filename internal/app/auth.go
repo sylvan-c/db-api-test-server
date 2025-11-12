@@ -2,7 +2,6 @@ package app
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"db-api-test-server/internal/auth"
 	"encoding/base64"
@@ -11,6 +10,17 @@ import (
 
 	"github.com/google/uuid"
 )
+
+type AuthService interface {
+	AuthenticateUser(username, password string) (int, error)
+	GenerateRefreshToken(userID int, deviceUUID string) (string, error)
+	RefreshAccessToken(refreshToken string) (string, error)
+	RevokeRefreshToken(refreshToken string) error
+	RevokeAllRefreshTokens(refreshToken string) error
+	GenerateDeviceUUID() string
+	GenerateAccessToken(userID int) (string, error)
+	ValidateAccessToken(tokenStr string) (*auth.Claims, error)
+}
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrInvalidRefreshToken = errors.New("invalid refresh token")
@@ -28,16 +38,11 @@ func (a *App) AuthenticateUser(username, password string) (int, error) {
 		return 0, err
 	}
 
-	if err := auth.AuthenticateUser(passwordHash, password); err != nil {
+	if err := a.Auth.Passwords.AuthenticateUser(passwordHash, password); err != nil {
 		return 0, ErrInvalidCredentials
 	}
 
 	return userID, nil
-}
-
-func (a *App) hashToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return base64.URLEncoding.EncodeToString(sum[:])
 }
 
 func (a *App) GenerateRefreshToken(userID int, deviceUUID string) (string, error) {
@@ -47,7 +52,7 @@ func (a *App) GenerateRefreshToken(userID int, deviceUUID string) (string, error
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	res, err := a.DB.Exec(`INSERT INTO refresh_tokens (user_id, device_uuid, token, expiry_tst, revoked) VALUES ($1, $2, $3, now()+INTERVAL '30 days', false)`, userID, deviceUUID, a.hashToken(token))
+	res, err := a.DB.Exec(`INSERT INTO refresh_tokens (user_id, device_uuid, token, expiry_tst, revoked) VALUES ($1, $2, $3, now()+INTERVAL '30 days', false)`, userID, deviceUUID, a.Auth.Tokens.HashToken(token))
 	if err != nil {
 		return "", err
 	}
@@ -62,7 +67,7 @@ func (a *App) GenerateRefreshToken(userID int, deviceUUID string) (string, error
 
 func (a *App) getUserIDForRefreshToken(refreshToken string) (int, error) {
 	var userID int
-	err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.hashToken(refreshToken)).
+	err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.Auth.Tokens.HashToken(refreshToken)).
 		Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrInvalidRefreshToken
@@ -77,7 +82,7 @@ func (a *App) RefreshAccessToken(refreshToken string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	accessToken, err := a.Auth.GenerateAccessToken(userID)
+	accessToken, err := a.Auth.Tokens.GenerateAccessToken(userID)
 	if err != nil {
 		return "", nil
 	}
@@ -85,7 +90,7 @@ func (a *App) RefreshAccessToken(refreshToken string) (string, error) {
 }
 
 func (a *App) RevokeRefreshToken(refreshToken string) error {
-	res, err := a.DB.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token = $1`, a.hashToken(refreshToken))
+	res, err := a.DB.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token = $1`, a.Auth.Tokens.HashToken(refreshToken))
 	if err != nil {
 		return err
 	}
@@ -117,4 +122,14 @@ func (a *App) RevokeAllRefreshTokens(refreshToken string) error {
 
 func (a *App) GenerateDeviceUUID() string {
 	return uuid.New().String()
+}
+
+//auth methods
+
+func (a *App) GenerateAccessToken(userID int) (string, error) {
+	return a.Auth.Tokens.GenerateAccessToken(userID)
+}
+
+func (a *App) ValidateAccessToken(tokenStr string) (*auth.Claims, error) {
+	return a.Auth.Tokens.ValidateAccessToken(tokenStr)
 }

@@ -8,6 +8,13 @@ import (
 	_ "github.com/lib/pq"
 )
 
+type DBAdapter interface {
+	Begin() (*sql.Tx, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 func Connect(dsn string) (*sql.DB, error) {
 	var db *sql.DB
 	var err error

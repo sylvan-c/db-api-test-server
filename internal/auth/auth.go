@@ -2,14 +2,95 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/argon2"
 )
+
+type AuthAdapter struct {
+	Tokens    TokenGenerator
+	Passwords PasswordHasher
+}
+
+// Token stuff
+
+type TokenGenerator interface {
+	GenerateAccessToken(userID int) (string, error)
+	ValidateAccessToken(tokenStr string) (*Claims, error)
+	HashToken(token string) string
+}
+
+type JWTAuth struct {
+	secret []byte
+}
+
+func NewJWTAuth(secret string) TokenGenerator {
+	return &JWTAuth{secret: []byte(secret)}
+}
+
+type Claims struct {
+	UserID int `json:"user_id"`
+	jwt.RegisteredClaims
+}
+
+func (j *JWTAuth) GenerateAccessToken(userID int) (string, error) {
+	claims := Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(j.secret)
+}
+
+func (j *JWTAuth) ValidateAccessToken(tokenStr string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
+		// Ensure token was signed with HMAC (HS256)
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, jwt.ErrTokenSignatureInvalid
+		}
+		return j.secret, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, jwt.ErrTokenInvalidClaims
+	}
+
+	return claims, nil
+}
+
+func (j *JWTAuth) HashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return base64.URLEncoding.EncodeToString(sum[:])
+}
+
+// Password stuff
+
+type PasswordHasher interface {
+	HashPasswordSecure(password string) (string, error)
+	AuthenticateUser(storedHash, password string) error
+}
+
+type PasswordAuth struct{}
+
+func NewPasswordAuth() PasswordHasher {
+	return &PasswordAuth{}
+}
 
 type Argon2Configuration struct {
 	HashRaw    []byte
@@ -20,7 +101,7 @@ type Argon2Configuration struct {
 	KeyLength  uint32
 }
 
-func generateCryptographicSalt(saltSize uint32) ([]byte, error) {
+func (p *PasswordAuth) generateCryptographicSalt(saltSize uint32) ([]byte, error) {
 	salt := make([]byte, saltSize)
 	_, err := rand.Read(salt)
 	if err != nil {
@@ -29,7 +110,7 @@ func generateCryptographicSalt(saltSize uint32) ([]byte, error) {
 	return salt, nil
 }
 
-func HashPasswordSecure(password string) (string, error) {
+func (p *PasswordAuth) HashPasswordSecure(password string) (string, error) {
 	config := &Argon2Configuration{
 		TimeCost:   2,
 		MemoryCost: 64 * 1024,
@@ -37,7 +118,7 @@ func HashPasswordSecure(password string) (string, error) {
 		KeyLength:  32,
 	}
 
-	salt, err := generateCryptographicSalt(16)
+	salt, err := p.generateCryptographicSalt(16)
 	if err != nil {
 		return "", fmt.Errorf("password hashing failed: %w", err)
 	}
@@ -67,7 +148,7 @@ func HashPasswordSecure(password string) (string, error) {
 	return encodedHash, nil
 }
 
-func parseArgon2Hash(encodedHash string) (*Argon2Configuration, error) {
+func (p *PasswordAuth) parseArgon2Hash(encodedHash string) (*Argon2Configuration, error) {
 	components := strings.Split(encodedHash, "$")
 	if len(components) != 6 {
 		return nil, errors.New("invalid hash format structure")
@@ -105,9 +186,9 @@ func parseArgon2Hash(encodedHash string) (*Argon2Configuration, error) {
 	return config, nil
 }
 
-func verifyPasswordSecure(storedHash, providedPassword string) (bool, error) {
+func (p *PasswordAuth) verifyPasswordSecure(storedHash, providedPassword string) (bool, error) {
 	// Parse stored hash parameters
-	config, err := parseArgon2Hash(storedHash)
+	config, err := p.parseArgon2Hash(storedHash)
 	if err != nil {
 		return false, fmt.Errorf("hash parsing failed: %w", err)
 	}
@@ -127,8 +208,8 @@ func verifyPasswordSecure(storedHash, providedPassword string) (bool, error) {
 	return match, nil
 }
 
-func AuthenticateUser(storedHash, password string) error {
-	isValid, err := verifyPasswordSecure(storedHash, password)
+func (p *PasswordAuth) AuthenticateUser(storedHash, password string) error {
+	isValid, err := p.verifyPasswordSecure(storedHash, password)
 	if err != nil {
 		return fmt.Errorf("authentication process failed: %w", err)
 	}

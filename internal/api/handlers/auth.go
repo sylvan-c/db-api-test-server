@@ -24,7 +24,7 @@ type loginResponse struct {
 	DeviceUUID   string `json:"deviceUUID,omitempty"`
 }
 
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -44,10 +44,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	deviceUUID := req.DeviceUUID
 	if deviceUUID == "" {
-		deviceUUID = h.App.GenerateDeviceUUID()
+		deviceUUID = h.Auth.GenerateDeviceUUID()
 	}
 
-	userID, err := h.App.AuthenticateUser(req.Username, req.Password)
+	userID, err := h.Auth.AuthenticateUser(req.Username, req.Password)
 	if errors.Is(err, app.ErrInvalidCredentials) {
 		respondJSON(w, loginResponse{}, http.StatusUnauthorized)
 		return
@@ -56,12 +56,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := h.App.Auth.GenerateAccessToken(userID)
+	accessToken, err := h.Auth.GenerateAccessToken(userID)
 	if err != nil {
 		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
 		return
 	}
-	refreshToken, err := h.App.GenerateRefreshToken(userID, deviceUUID)
+	refreshToken, err := h.Auth.GenerateRefreshToken(userID, deviceUUID)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
@@ -70,14 +70,19 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, loginResponse{AccessToken: accessToken, RefreshToken: refreshToken, DeviceUUID: deviceUUID}, http.StatusOK)
 }
 
-func (h *Handler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
-	accessToken, err := h.App.RefreshAccessToken(req.RefreshToken)
+	if req.RefreshToken == "" {
+		http.Error(w, "refreshToken is required", http.StatusBadRequest)
+		return
+	}
+
+	accessToken, err := h.Auth.RefreshAccessToken(req.RefreshToken)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
@@ -87,14 +92,19 @@ func (h *Handler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, loginResponse{AccessToken: accessToken}, http.StatusOK)
 }
 
-func (h *Handler) LogOut(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) LogOut(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
-	err := h.App.RevokeRefreshToken(req.RefreshToken)
+	if req.RefreshToken == "" {
+		http.Error(w, "refreshToken is required", http.StatusBadRequest)
+		return
+	}
+
+	err := h.Auth.RevokeRefreshToken(req.RefreshToken)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to revoke refresh token", http.StatusInternalServerError)
@@ -104,14 +114,19 @@ func (h *Handler) LogOut(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, nil, http.StatusOK)
 }
 
-func (h *Handler) LogOutAll(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) LogOutAll(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
-	err := h.App.RevokeAllRefreshTokens(req.RefreshToken)
+	if req.RefreshToken == "" {
+		http.Error(w, "refreshToken is required", http.StatusBadRequest)
+		return
+	}
+
+	err := h.Auth.RevokeAllRefreshTokens(req.RefreshToken)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to revoke refresh tokens", http.StatusInternalServerError)

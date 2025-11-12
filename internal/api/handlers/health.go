@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
+func (h *EmptyHandler) Health(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }

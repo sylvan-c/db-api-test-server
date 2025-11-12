@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func JWTMiddleware(h *handlers.Handler) func(http.Handler) http.Handler {
+func JWTMiddleware(h *handlers.AuthHandler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -24,7 +24,7 @@ func JWTMiddleware(h *handlers.Handler) func(http.Handler) http.Handler {
 			}
 
 			tokenStr := parts[1]
-			claims, err := h.App.Auth.ValidateAccessToken(tokenStr)
+			claims, err := h.Auth.ValidateAccessToken(tokenStr)
 			if err != nil {
 				http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 				return

@@ -22,10 +22,13 @@ func main() {
 	}
 	defer conn.Close()
 
-	jwtService := auth.NewJWTService(cfg.JWTSecret)
+	authAdapter := auth.AuthAdapter{
+		Tokens:    auth.NewJWTAuth(cfg.JWTSecret),
+		Passwords: auth.NewPasswordAuth(),
+	}
 	apiClient := external.NewClient(cfg.ExternalAPIBaseURL)
 
-	application := app.New(conn, jwtService, apiClient)
+	application := app.New(conn, authAdapter, apiClient)
 	router := router.NewRouter(application)
 
 	fmt.Println("Server running on :" + cfg.Port)

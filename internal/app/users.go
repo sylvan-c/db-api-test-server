@@ -1,13 +1,17 @@
 package app
 
 import (
-	"db-api-test-server/internal/auth"
 	"errors"
 	"unicode"
 )
 
+type UserService interface {
+	GetUserByID(userID int) (*User, error)
+	CreateUser(req *CreateUserRequest) (*User, error)
+}
+
 type User struct {
-	Id        int    `json:"id"`
+	ID        int    `json:"id"`
 	Username  string `json:"username"`
 	Email     string `json:"email"`
 	FirstName string `json:"firstName"`
@@ -28,28 +32,11 @@ func (a *App) GetUserByID(userID int) (*User, error) {
 	var user User
 
 	err := a.DB.QueryRow(`SELECT U.id, U.username, UD.email, UD.first_name, UD.last_name FROM Users U JOIN User_Details UD ON U.id = UD.user_id WHERE U.id = $1`, userID).
-		Scan(&user.Id, &user.Username, &user.Email, &user.FirstName, &user.LastName)
+		Scan(&user.ID, &user.Username, &user.Email, &user.FirstName, &user.LastName)
 	if err != nil {
 		return nil, err
 	}
 	return &user, nil
-}
-
-func (a *App) ListUsers() (*[]User, error) {
-	rows, err := a.DB.Query(`SELECT U.id, U.username, UD.email, UD.first_name, UD.last_name FROM Users U JOIN User_Details UD ON U.id = UD.user_id`)
-	if err != nil {
-		return nil, err
-	}
-
-	var usersList []User
-	for rows.Next() {
-		var user User
-		if err := rows.Scan(&user.Id, &user.Username, &user.Email, &user.FirstName, &user.LastName); err != nil {
-			return nil, err
-		}
-		usersList = append(usersList, user)
-	}
-	return &usersList, nil
 }
 
 func (a *App) CreateUser(req *CreateUserRequest) (*User, error) {
@@ -57,7 +44,7 @@ func (a *App) CreateUser(req *CreateUserRequest) (*User, error) {
 		return nil, err
 	}
 
-	hash, err := auth.HashPasswordSecure(req.Password)
+	hash, err := a.Auth.Passwords.HashPasswordSecure(req.Password)
 	if err != nil {
 		return nil, err
 	}

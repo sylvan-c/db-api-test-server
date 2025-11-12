@@ -6,11 +6,15 @@ import (
 	"net/http"
 )
 
+type ClientService interface {
+	FetchData() (string, error)
+}
+
 type Client struct {
 	BaseURL string
 }
 
-func NewClient(baseURL string) *Client {
+func NewClient(baseURL string) ClientService {
 	return &Client{BaseURL: baseURL}
 }
 
