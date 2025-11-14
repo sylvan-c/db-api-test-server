@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"errors"
 	"unicode"
 )
@@ -8,31 +9,33 @@ import (
 type UserService interface {
 	GetUserByID(userID int) (*User, error)
 	CreateUser(req *CreateUserRequest) (*User, error)
+	GetPublicIDForUser(userID int) (string, error)
+	GetUserIDByPublicID(userPubID string) (int, error)
 }
 
 type User struct {
 	ID        int    `json:"id"`
-	Username  string `json:"username"`
+	PublicID  string `json:"publicID"`
 	Email     string `json:"email"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 }
 
 type CreateUserRequest struct {
-	Username  string `json:"username"`
-	Password  string `json:"password"`
 	Email     string `json:"email"`
+	Password  string `json:"password"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 }
 
 var ErrPasswordInvalidFormat = errors.New("password in invalid format")
+var ErrInvalidID = errors.New("invalid user public id")
 
 func (a *App) GetUserByID(userID int) (*User, error) {
 	var user User
 
-	err := a.DB.QueryRow(`SELECT U.id, U.username, UD.email, UD.first_name, UD.last_name FROM Users U JOIN User_Details UD ON U.id = UD.user_id WHERE U.id = $1`, userID).
-		Scan(&user.ID, &user.Username, &user.Email, &user.FirstName, &user.LastName)
+	err := a.DB.QueryRow(`SELECT U.id, U.public_id, U.email, UD.first_name, UD.last_name FROM Users U JOIN User_Details UD ON U.id = UD.user_id WHERE U.id = $1`, userID).
+		Scan(&user.ID, &user.PublicID, &user.Email, &user.FirstName, &user.LastName)
 	if err != nil {
 		return nil, err
 	}
@@ -57,8 +60,8 @@ func (a *App) CreateUser(req *CreateUserRequest) (*User, error) {
 
 	var userID int
 	err = a.DB.QueryRow(
-		"INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id",
-		req.Username,
+		"INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
+		req.Email,
 		hash,
 	).Scan(&userID)
 	if err != nil {
@@ -67,9 +70,8 @@ func (a *App) CreateUser(req *CreateUserRequest) (*User, error) {
 
 	var userDetailsID int
 	err = a.DB.QueryRow(
-		"INSERT INTO user_details (user_id, email, first_name, last_name) VALUES ($1, $2, $3, $4) RETURNING id",
+		"INSERT INTO user_details (user_id, first_name, last_name) VALUES ($1, $2, $3) RETURNING id",
 		userID,
-		req.Email,
 		req.FirstName,
 		req.LastName,
 	).Scan(&userDetailsID)
@@ -109,4 +111,26 @@ func (a *App) validatePassword(password string) error {
 		return ErrPasswordInvalidFormat
 	}
 	return nil
+}
+
+func (a *App) GetPublicIDForUser(userID int) (string, error) {
+	var userPubID string
+	err := a.DB.QueryRow(`SELECT public_id FROM users WHERE id = $1`, userID).
+		Scan(&userPubID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrInvalidID
+	} else if err != nil {
+		return "", err
+	}
+	return userPubID, nil
+}
+
+func (a *App) GetUserIDByPublicID(userPubID string) (int, error) {
+	var userID int
+	err := a.DB.QueryRow(`SELECT id FROM users WHERE public_id = $1`, userPubID).
+		Scan(&userID)
+	if err != nil {
+		return 0, err
+	}
+	return userID, nil
 }

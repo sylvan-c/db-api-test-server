@@ -36,7 +36,7 @@ func NewJWTAuth(secret string) TokenGenerator {
 }
 
 type Claims struct {
-	UserID int `json:"user_id"`
+	UserID int `json:"userID"`
 	jwt.RegisteredClaims
 }
 
