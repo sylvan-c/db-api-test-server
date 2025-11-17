@@ -27,6 +27,7 @@ jobs:
       - name: Detect changed Go packages
         id: detect-packages
         run: |
+          echo "${GITHUB_EVENT_BEFORE}"
           if [ -n "${GITHUB_EVENT_BEFORE}" ]; then
             range="${GITHUB_EVENT_BEFORE}..${GITHUB_SHA}"
           else
