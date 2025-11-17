@@ -111,8 +111,6 @@ func (h *AuthHandler) LogOut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("CI test")
-
 	respondJSON(w, nil, http.StatusOK)
 }
 
