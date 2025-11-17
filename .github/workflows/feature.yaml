@@ -17,7 +17,7 @@ jobs:
 
       - name: Fetch dev branch
         run: |
-          git fetch origin dev:dev
+          git fetch --unshallow origin dev:dev
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -32,15 +32,15 @@ jobs:
         id: detect-packages
         run: |
           merge_base=$(git merge-base dev HEAD)
-          changed_files=$(git diff --diff-filter=AM --name-only ${merge_base}..HEAD | grep "\.go$" || true)
+          changed_files=$(git diff --diff-filter=AM --name-only "${merge_base}"..HEAD | grep '\.go$' || true)
 
           if [ -n "$changed_files" ]; then
-            changed_packages=$(echo "$changed_files" | xargs -n1 dirname | sort -u | sed 's/^\.$/./')
-            echo "Changed packages:"
-            echo "$changed_packages"
-            echo "CHANGED_PACKAGES=$changed_packages" >> $GITHUB_ENV
+              changed_packages=$(echo "$changed_files" | xargs -n1 dirname | sort -u | sed 's/^\.$/./')
+              echo "Changed packages:"
+              echo "$changed_packages"
+              echo "CHANGED_PACKAGES=$changed_packages" >> $GITHUB_ENV
           else
-            echo "No Go files changed."
+              echo "No Go files changed."
           fi
 
       - name: Run tests in changed packages
