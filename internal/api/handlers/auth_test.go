@@ -15,7 +15,7 @@ import (
 )
 
 type mockAuthService struct {
-	AuthenticateUserFunc       func(username, password string) (int, error)
+	AuthenticateUserFunc       func(email, password string) (int, error)
 	GenerateRefreshTokenFunc   func(userID int, deviceUUID string) (string, error)
 	RefreshAccessTokenFunc     func(refreshToken string) (string, error)
 	RevokeRefreshTokenFunc     func(refreshToken string) error
@@ -25,8 +25,8 @@ type mockAuthService struct {
 	ValidateAccessTokenFunc    func(tokenStr string) (*auth.Claims, error)
 }
 
-func (a *mockAuthService) AuthenticateUser(username, password string) (int, error) {
-	return a.AuthenticateUserFunc(username, password)
+func (a *mockAuthService) AuthenticateUser(email, password string) (int, error) {
+	return a.AuthenticateUserFunc(email, password)
 }
 
 func (a *mockAuthService) GenerateRefreshToken(userID int, deviceUUID string) (string, error) {
@@ -73,7 +73,7 @@ func TestLoginHandler(t *testing.T) {
 		// pass
 		{
 			name:           "pass with uuid",
-			body:           `{"username":"valid-user","password":"valid-password","deviceUUID":"input-uuid"}`,
+			body:           `{"email":"valid-user@mail.com","password":"valid-password","deviceUUID":"input-uuid"}`,
 			uuid:           "generated-uuid",
 			userID:         1,
 			accessToken:    "valid-access-token",
@@ -82,7 +82,7 @@ func TestLoginHandler(t *testing.T) {
 		},
 		{
 			name:           "pass without uuid",
-			body:           `{"username":"valid-user","password":"valid-password"}`,
+			body:           `{"email":"valid-user@mail.com","password":"valid-password"}`,
 			uuid:           "generated-uuid",
 			userID:         1,
 			accessToken:    "valid-access-token",
@@ -97,17 +97,17 @@ func TestLoginHandler(t *testing.T) {
 		},
 		{
 			name:           "missing password",
-			body:           `{"username":"user"}`,
+			body:           `{"email":"valid-user@mail.com"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "missing username",
+			name:           "missing email",
 			body:           `{"password":"password"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:                "invalid creds",
-			body:                `{"username":"invalid-user","password":"invalid-password"}`,
+			body:                `{"email":"invalid-user@mail.com","password":"invalid-password"}`,
 			userID:              0,
 			authenticateUserErr: app.ErrInvalidCredentials,
 			expectedStatus:      http.StatusUnauthorized,
@@ -124,7 +124,7 @@ func TestLoginHandler(t *testing.T) {
 					uuidFuncCalled = true
 					return tt.uuid
 				},
-				AuthenticateUserFunc: func(username, password string) (int, error) {
+				AuthenticateUserFunc: func(email, password string) (int, error) {
 					returnedUserID = tt.userID
 					return tt.userID, tt.authenticateUserErr
 				},

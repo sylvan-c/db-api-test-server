@@ -9,7 +9,7 @@ import (
 )
 
 type loginRequest struct {
-	Username   string `json:"username"`
+	Email      string `json:"email"`
 	Password   string `json:"password"`
 	DeviceUUID string `json:"deviceUUID"`
 }
@@ -37,8 +37,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	if req.Username == "" || req.Password == "" {
-		http.Error(w, "username and password are required", http.StatusBadRequest)
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "email and password are required", http.StatusBadRequest)
 		return
 	}
 
@@ -47,7 +47,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		deviceUUID = h.Auth.GenerateDeviceUUID()
 	}
 
-	userID, err := h.Auth.AuthenticateUser(req.Username, req.Password)
+	userID, err := h.Auth.AuthenticateUser(req.Email, req.Password)
 	if errors.Is(err, app.ErrInvalidCredentials) {
 		respondJSON(w, loginResponse{}, http.StatusUnauthorized)
 		return

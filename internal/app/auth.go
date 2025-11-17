@@ -12,7 +12,7 @@ import (
 )
 
 type AuthService interface {
-	AuthenticateUser(username, password string) (int, error)
+	AuthenticateUser(email, password string) (int, error)
 	GenerateRefreshToken(userID int, deviceUUID string) (string, error)
 	RefreshAccessToken(refreshToken string) (string, error)
 	RevokeRefreshToken(refreshToken string) error
@@ -25,11 +25,11 @@ type AuthService interface {
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrInvalidRefreshToken = errors.New("invalid refresh token")
 
-func (a *App) AuthenticateUser(username, password string) (int, error) {
+func (a *App) AuthenticateUser(email, password string) (int, error) {
 	var userID int
 	var passwordHash string
 
-	err := a.DB.QueryRow(`SELECT id, password_hash FROM users WHERE username=$1`, username).
+	err := a.DB.QueryRow(`SELECT id, password_hash FROM users WHERE email=$1`, email).
 		Scan(&userID, &passwordHash)
 
 	if errors.Is(err, sql.ErrNoRows) {

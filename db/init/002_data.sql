@@ -1,1 +1,1 @@
-INSERT INTO Test_Table (Test_Column) VALUES ('abc');
+-- INSERT INTO Test_Table (Test_Column) VALUES ('abc');

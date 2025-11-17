@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -19,8 +18,8 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Username == "" || req.Password == "" || req.Email == "" || req.FirstName == "" || req.LastName == "" {
-		http.Error(w, "Username, password, email, first name and last name are required", http.StatusBadRequest)
+	if req.Email == "" || req.Password == "" || req.FirstName == "" || req.LastName == "" {
+		http.Error(w, "Email, password, first name and last name are required", http.StatusBadRequest)
 		return
 	}
 
@@ -41,11 +40,12 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	idStr := vars["id"]
+	userPubID := vars["id"]
 
-	userID, err := strconv.Atoi(idStr)
-	if err != nil || userID <= 0 {
-		http.Error(w, "invalid user ID", http.StatusBadRequest)
+	userID, err := h.User.GetUserIDByPublicID(userPubID)
+	if err != nil {
+		log.Printf("invalid public id. public id: %s", userPubID)
+		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
 
@@ -61,17 +61,25 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) GetMeRedirect(w http.ResponseWriter, r *http.Request) {
 	idVal := r.Context().Value(contextkeys.UserID)
 	if idVal == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorised", http.StatusUnauthorized)
 		return
 	}
 
 	userID, ok := idVal.(int)
 	if !ok {
-		http.Error(w, "invalid user id type", http.StatusInternalServerError)
+		log.Printf("invalid user id type. user id: %v", idVal)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	redirectURL := fmt.Sprintf("/api/users/%d", userID)
+	userPubID, err := h.User.GetPublicIDForUser(userID)
+	if err != nil {
+		log.Printf("could not find public id for user id: %d", userID)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	redirectURL := fmt.Sprintf("/api/users/%s", userPubID)
 
 	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
