@@ -1,0 +1,57 @@
+name: feature CI
+
+on:
+  push:
+    branches:
+      - 'feature/*'
+  pull_request:
+    branches:
+      - 'feature/*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install dependencies
+        run: go mod tidy
+
+      - name: Detect changed Go packages
+        id: detect-packages
+        run: |
+          if [ -n "${GITHUB_EVENT_BEFORE}" ]; then
+            range="${GITHUB_EVENT_BEFORE}..${GITHUB_SHA}"
+          else
+            range=$(git rev-parse --verify HEAD)
+          fi
+
+          changed_packages=$(git diff --diff-filter=AM --name-only $range | grep '\.go$' || true)
+          changed_packages=$(echo "$changed_packages" | xargs -n1 dirname | sort -u | sed 's/^\\.$/./')
+
+          if [ -z "$changed_packages" ]; then
+            echo "No Go files changed."
+          else
+            echo "Changed packages:"
+            echo "$changed_packages"
+            echo "CHANGED_PACKAGES=$changed_packages" >> $GITHUB_ENV
+          fi
+
+      - name: Run tests in changed packages
+        run: |
+          if [ -z "$CHANGED_PACKAGES" ]; then
+            echo "No Go files changed, skipping tests"
+          else
+            IFS=$'\n'
+            for pkg in $CHANGED_PACKAGES; do
+              echo "Running tests in $pkg"
+              go test -v "$pkg"
+            done
+            unset IFS
+          fi
