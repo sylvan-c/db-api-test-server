@@ -168,7 +168,7 @@ func TestLoginHandler(t *testing.T) {
 				assert.Equal(t, "generated-uuid", usedUUID, "handler should use generated UUID")
 				assert.Equal(t, 1, returnedUserID, "returned user id should be 1")
 				assert.Equal(t, "valid-access-token", body["accessToken"], "returned access token should be valid-access-token")
-				assert.Equal(t, "valid-refresh-token", body["refreshToken"], "returned refresh token should be valid-refresh-token")
+				assert.Equal(t, "valid-refresh-token-testfail", body["refreshToken"], "returned refresh token should be valid-refresh-token")
 			}
 			if tt.name == "invalid creds" {
 				assert.Equal(t, 0, returnedUserID, "returned user id should be 0")
