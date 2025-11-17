@@ -32,15 +32,15 @@ jobs:
             range=$(git rev-parse --verify HEAD)
           fi
 
-          changed_packages=$(git diff --diff-filter=AM --name-only $range | grep '\.go$' || true)
-          changed_packages=$(echo "$changed_packages" | xargs -n1 dirname | sort -u | sed 's/^\\.$/./')
+          changed_files=$(git diff --diff-filter=AM --name-only $range | grep '\.go$' || true)
 
-          if [ -z "$changed_packages" ]; then
-            echo "No Go files changed."
-          else
+          if [ -n "$changed_files" ]; then
+            changed_packages=$(echo "$changed_files" | xargs -n1 dirname | sort -u | sed 's/^\.$/./')
             echo "Changed packages:"
             echo "$changed_packages"
             echo "CHANGED_PACKAGES=$changed_packages" >> $GITHUB_ENV
+          else
+            echo "No Go files changed."
           fi
 
       - name: Run tests in changed packages
