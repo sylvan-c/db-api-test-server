@@ -27,13 +27,8 @@ jobs:
       - name: Detect changed Go packages
         id: detect-packages
         run: |
-          echo "${GITHUB_EVENT_BEFORE}"
-          if [ -n "${GITHUB_EVENT_BEFORE}" ]; then
-            range="${GITHUB_EVENT_BEFORE}..${GITHUB_SHA}"
-          else
-            range=$(git rev-parse --verify HEAD)
-          fi
-
+          merge_base=$(git merge-base dev HEAD)
+          range="${merge_base}..${GITHUB_SHA}"
           changed_files=$(git diff --diff-filter=AM --name-only $range | grep '\.go$' || true)
 
           if [ -n "$changed_files" ]; then
