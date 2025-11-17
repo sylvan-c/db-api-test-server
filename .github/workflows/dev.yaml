@@ -12,8 +12,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          - fetch-depth: 0 
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -25,3 +32,16 @@ jobs:
 
       - name: Run all tests
         run: go test ./...
+
+      - name: Auto merge to stable
+        run: |
+          git fetch origin stable:stable
+          git switch stable
+          git merge origin/dev --no-ff -m "Merge dev into stable [skip ci]"
+        continue-on-error: false  # fail if there are conflicts
+      
+      - name: Push stable
+        run: git push origin stable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
