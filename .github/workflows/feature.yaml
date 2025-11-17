@@ -32,8 +32,7 @@ jobs:
         id: detect-packages
         run: |
           merge_base=$(git merge-base dev HEAD)
-          range="${merge_base}..${GITHUB_SHA}"
-          changed_files=$(git diff --diff-filter=AM --name-only $range | grep '\.go$' || true)
+          changed_files=$(git diff --diff-filter=AM --name-only ${merge_base}..HEAD | grep "\.go$"" || true)
 
           if [ -n "$changed_files" ]; then
             changed_packages=$(echo "$changed_files" | xargs -n1 dirname | sort -u | sed 's/^\.$/./')
