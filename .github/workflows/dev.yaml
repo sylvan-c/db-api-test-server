@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - 'dev'
-  pull_request:
-    branches:
-      - 'dev'
 
 jobs:
   test:
@@ -37,16 +34,4 @@ jobs:
         run: |
           git tag dev-$(date +%Y%m%d)-$GITHUB_RUN_NUMBER
           git push origin dev-$(date +%Y%m%d)-$GITHUB_RUN_NUMBER
-
-      - name: Auto merge to stable
-        run: |
-          git fetch origin stable:stable
-          git switch stable
-          git merge origin/dev --no-ff -m "Merge dev into stable [skip ci]"
-        continue-on-error: false  # fail if there are conflicts
-      
-      - name: Push stable
-        run: git push origin stable
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
