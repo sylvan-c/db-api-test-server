@@ -44,15 +44,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auto merge to stable
-        run: |
-          git fetch origin stable:stable
-          git switch stable
-          git merge origin/dev --no-ff -m "Merge dev into stable [skip ci]"
-        continue-on-error: false  # fail if there are conflicts
-      
-      - name: Push stable
-        run: git push origin stable
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
