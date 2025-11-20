@@ -33,6 +33,11 @@ jobs:
       - name: Run all tests
         run: go test ./...
 
+      - name: Tag build
+        run: |
+          git tag dev-$(date +%Y%m%d)-$GITHUB_RUN_NUMBER
+          git push origin dev-$(date +%Y%m%d)-$GITHUB_RUN_NUMBER
+
       - name: Auto merge to stable
         run: |
           git fetch origin stable:stable
