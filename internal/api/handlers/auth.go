@@ -25,6 +25,8 @@ type loginResponse struct {
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -47,7 +49,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		deviceUUID = h.Auth.GenerateDeviceUUID()
 	}
 
-	userID, err := h.Auth.AuthenticateUser(req.Email, req.Password)
+	userID, err := h.Auth.AuthenticateUser(ctx, req.Email, req.Password)
 	if errors.Is(err, app.ErrInvalidCredentials) {
 		respondJSON(w, loginResponse{}, http.StatusUnauthorized)
 		return
@@ -61,7 +63,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
 		return
 	}
-	refreshToken, err := h.Auth.GenerateRefreshToken(userID, deviceUUID)
+	refreshToken, err := h.Auth.GenerateRefreshToken(ctx, userID, deviceUUID)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
@@ -71,6 +73,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -82,7 +86,7 @@ func (h *AuthHandler) RefreshAccessToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	accessToken, err := h.Auth.RefreshAccessToken(req.RefreshToken)
+	accessToken, err := h.Auth.RefreshAccessToken(ctx, req.RefreshToken)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
@@ -93,6 +97,8 @@ func (h *AuthHandler) RefreshAccessToken(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *AuthHandler) LogOut(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -104,7 +110,7 @@ func (h *AuthHandler) LogOut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.Auth.RevokeRefreshToken(req.RefreshToken)
+	err := h.Auth.RevokeRefreshToken(ctx, req.RefreshToken)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to revoke refresh token", http.StatusInternalServerError)
@@ -115,6 +121,8 @@ func (h *AuthHandler) LogOut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) LogOutAll(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -126,7 +134,7 @@ func (h *AuthHandler) LogOutAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.Auth.RevokeAllRefreshTokens(req.RefreshToken)
+	err := h.Auth.RevokeAllRefreshTokens(ctx, req.RefreshToken)
 	if err != nil {
 		log.Printf("%v", err.Error())
 		http.Error(w, "failed to revoke refresh tokens", http.StatusInternalServerError)
