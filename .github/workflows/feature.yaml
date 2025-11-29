@@ -38,7 +38,11 @@ jobs:
               changed_packages=$(echo "$changed_files" | xargs -n1 dirname | sort -u | sed 's/^\.$/./')
               echo "Changed packages:"
               echo "$changed_packages"
-              echo "CHANGED_PACKAGES=$changed_packages" >> $GITHUB_ENV
+              {
+                echo "CHANGED_PACKAGES<<EOF"
+                echo "$changed_packages"
+                echo "EOF"
+              } >> "$GITHUB_ENV"
           else
               echo "No Go files changed."
           fi
