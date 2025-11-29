@@ -12,6 +12,8 @@ import (
 )
 
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	var req app.CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
@@ -23,7 +25,7 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.User.CreateUser(&req)
+	user, err := h.User.CreateUser(ctx, &req)
 	if err != nil {
 		if err == app.ErrPasswordInvalidFormat {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -39,17 +41,19 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	vars := mux.Vars(r)
 	userPubID := vars["id"]
 
-	userID, err := h.User.GetUserIDByPublicID(userPubID)
+	userID, err := h.User.GetUserIDByPublicID(ctx, userPubID)
 	if err != nil {
 		log.Printf("invalid public id. public id: %s", userPubID)
 		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
 
-	user, err := h.User.GetUserByID(userID)
+	user, err := h.User.GetUserByID(ctx, userID)
 	if err != nil {
 		http.Error(w, "user not found", http.StatusNotFound)
 		return
@@ -59,6 +63,8 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) GetMeRedirect(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	idVal := r.Context().Value(contextkeys.UserID)
 	if idVal == nil {
 		http.Error(w, "unauthorised", http.StatusUnauthorized)
@@ -72,7 +78,7 @@ func (h *UserHandler) GetMeRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userPubID, err := h.User.GetPublicIDForUser(userID)
+	userPubID, err := h.User.GetPublicIDForUser(ctx, userID)
 	if err != nil {
 		log.Printf("could not find public id for user id: %d", userID)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

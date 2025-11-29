@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"db-api-test-server/internal/app"
 	"db-api-test-server/internal/auth"
 	"encoding/json"
@@ -10,39 +11,40 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 type mockAuthService struct {
-	AuthenticateUserFunc       func(email, password string) (int, error)
-	GenerateRefreshTokenFunc   func(userID int, deviceUUID string) (string, error)
-	RefreshAccessTokenFunc     func(refreshToken string) (string, error)
-	RevokeRefreshTokenFunc     func(refreshToken string) error
-	RevokeAllRefreshTokensFunc func(refreshToken string) error
+	AuthenticateUserFunc       func(ctx context.Context, email, password string) (int, error)
+	GenerateRefreshTokenFunc   func(ctx context.Context, userID int, deviceUUID string) (string, error)
+	RefreshAccessTokenFunc     func(ctx context.Context, refreshToken string) (string, error)
+	RevokeRefreshTokenFunc     func(ctx context.Context, refreshToken string) error
+	RevokeAllRefreshTokensFunc func(ctx context.Context, refreshToken string) error
 	GenerateDeviceUUIDFunc     func() string
 	GenerateAccessTokenFunc    func(userID int) (string, error)
 	ValidateAccessTokenFunc    func(tokenStr string) (*auth.Claims, error)
 }
 
-func (a *mockAuthService) AuthenticateUser(email, password string) (int, error) {
-	return a.AuthenticateUserFunc(email, password)
+func (a *mockAuthService) AuthenticateUser(ctx context.Context, email, password string) (int, error) {
+	return a.AuthenticateUserFunc(ctx, email, password)
 }
 
-func (a *mockAuthService) GenerateRefreshToken(userID int, deviceUUID string) (string, error) {
-	return a.GenerateRefreshTokenFunc(userID, deviceUUID)
+func (a *mockAuthService) GenerateRefreshToken(ctx context.Context, userID int, deviceUUID string) (string, error) {
+	return a.GenerateRefreshTokenFunc(ctx, userID, deviceUUID)
 }
 
-func (a *mockAuthService) RefreshAccessToken(refreshToken string) (string, error) {
-	return a.RefreshAccessTokenFunc(refreshToken)
+func (a *mockAuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (string, error) {
+	return a.RefreshAccessTokenFunc(ctx, refreshToken)
 }
 
-func (a *mockAuthService) RevokeRefreshToken(refreshToken string) error {
-	return a.RevokeRefreshTokenFunc(refreshToken)
+func (a *mockAuthService) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
+	return a.RevokeRefreshTokenFunc(ctx, refreshToken)
 }
 
-func (a *mockAuthService) RevokeAllRefreshTokens(refreshToken string) error {
-	return a.RevokeAllRefreshTokensFunc(refreshToken)
+func (a *mockAuthService) RevokeAllRefreshTokens(ctx context.Context, refreshToken string) error {
+	return a.RevokeAllRefreshTokensFunc(ctx, refreshToken)
 }
 
 func (a *mockAuthService) GenerateDeviceUUID() string {
@@ -124,14 +126,14 @@ func TestLoginHandler(t *testing.T) {
 					uuidFuncCalled = true
 					return tt.uuid
 				},
-				AuthenticateUserFunc: func(email, password string) (int, error) {
+				AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
 					returnedUserID = tt.userID
 					return tt.userID, tt.authenticateUserErr
 				},
 				GenerateAccessTokenFunc: func(userID int) (string, error) {
 					return tt.accessToken, tt.generateAccessTokenErr
 				},
-				GenerateRefreshTokenFunc: func(userID int, deviceUUID string) (string, error) {
+				GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
 					if deviceUUID != "" {
 						usedUUID = deviceUUID
 					}
@@ -139,7 +141,10 @@ func TestLoginHandler(t *testing.T) {
 				},
 			}
 
-			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(tt.body))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/login", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)
@@ -219,12 +224,15 @@ func TestRefreshAccessTokenHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockSvc := &mockAuthService{
-				RefreshAccessTokenFunc: func(token string) (string, error) {
+				RefreshAccessTokenFunc: func(ctx context.Context, token string) (string, error) {
 					return tt.token, tt.err
 				},
 			}
 
-			req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(tt.body))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/logout", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)
@@ -288,12 +296,15 @@ func TestLogoutHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockSvc := &mockAuthService{
-				RevokeRefreshTokenFunc: func(token string) error {
+				RevokeRefreshTokenFunc: func(ctx context.Context, token string) error {
 					return tt.err
 				},
 			}
 
-			req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(tt.body))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/logout", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)
@@ -342,12 +353,15 @@ func TestLogoutAllHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockSvc := &mockAuthService{
-				RevokeAllRefreshTokensFunc: func(token string) error {
+				RevokeAllRefreshTokensFunc: func(ctx context.Context, token string) error {
 					return tt.err
 				},
 			}
 
-			req := httptest.NewRequest(http.MethodPost, "/logout/all", strings.NewReader(tt.body))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/logout/all", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)

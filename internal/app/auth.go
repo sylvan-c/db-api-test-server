@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"db-api-test-server/internal/auth"
@@ -12,11 +13,11 @@ import (
 )
 
 type AuthService interface {
-	AuthenticateUser(email, password string) (int, error)
-	GenerateRefreshToken(userID int, deviceUUID string) (string, error)
-	RefreshAccessToken(refreshToken string) (string, error)
-	RevokeRefreshToken(refreshToken string) error
-	RevokeAllRefreshTokens(refreshToken string) error
+	AuthenticateUser(ctx context.Context, email, password string) (int, error)
+	GenerateRefreshToken(ctx context.Context, userID int, deviceUUID string) (string, error)
+	RefreshAccessToken(ctx context.Context, refreshToken string) (string, error)
+	RevokeRefreshToken(ctx context.Context, refreshToken string) error
+	RevokeAllRefreshTokens(ctx context.Context, refreshToken string) error
 	GenerateDeviceUUID() string
 	GenerateAccessToken(userID int) (string, error)
 	ValidateAccessToken(tokenStr string) (*auth.Claims, error)
@@ -25,11 +26,11 @@ type AuthService interface {
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrInvalidRefreshToken = errors.New("invalid refresh token")
 
-func (a *App) AuthenticateUser(email, password string) (int, error) {
+func (a *App) AuthenticateUser(ctx context.Context, email, password string) (int, error) {
 	var userID int
 	var passwordHash string
 
-	err := a.DB.QueryRow(`SELECT id, password_hash FROM users WHERE email=$1`, email).
+	err := a.DB.QueryRowContext(ctx, `SELECT id, password_hash FROM users WHERE email=$1`, email).
 		Scan(&userID, &passwordHash)
 
 	if errors.Is(err, sql.ErrNoRows) {
@@ -45,14 +46,14 @@ func (a *App) AuthenticateUser(email, password string) (int, error) {
 	return userID, nil
 }
 
-func (a *App) GenerateRefreshToken(userID int, deviceUUID string) (string, error) {
+func (a *App) GenerateRefreshToken(ctx context.Context, userID int, deviceUUID string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	res, err := a.DB.Exec(`INSERT INTO refresh_tokens (user_id, device_uuid, token, expiry_tst, revoked) VALUES ($1, $2, $3, now()+INTERVAL '30 days', false)`, userID, deviceUUID, a.Auth.Tokens.HashToken(token))
+	res, err := a.DB.ExecContext(ctx, `INSERT INTO refresh_tokens (user_id, device_uuid, token, expiry_tst, revoked) VALUES ($1, $2, $3, now()+INTERVAL '30 days', false)`, userID, deviceUUID, a.Auth.Tokens.HashToken(token))
 	if err != nil {
 		return "", err
 	}
@@ -65,9 +66,9 @@ func (a *App) GenerateRefreshToken(userID int, deviceUUID string) (string, error
 	return token, nil
 }
 
-func (a *App) getUserIDForRefreshToken(refreshToken string) (int, error) {
+func (a *App) getUserIDForRefreshToken(ctx context.Context, refreshToken string) (int, error) {
 	var userID int
-	err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.Auth.Tokens.HashToken(refreshToken)).
+	err := a.DB.QueryRowContext(ctx, `SELECT user_id FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.Auth.Tokens.HashToken(refreshToken)).
 		Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrInvalidRefreshToken
@@ -77,8 +78,8 @@ func (a *App) getUserIDForRefreshToken(refreshToken string) (int, error) {
 	return userID, nil
 }
 
-func (a *App) RefreshAccessToken(refreshToken string) (string, error) {
-	userID, err := a.getUserIDForRefreshToken(refreshToken)
+func (a *App) RefreshAccessToken(ctx context.Context, refreshToken string) (string, error) {
+	userID, err := a.getUserIDForRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return "", err
 	}
@@ -89,8 +90,8 @@ func (a *App) RefreshAccessToken(refreshToken string) (string, error) {
 	return accessToken, nil
 }
 
-func (a *App) RevokeRefreshToken(refreshToken string) error {
-	res, err := a.DB.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token = $1`, a.Auth.Tokens.HashToken(refreshToken))
+func (a *App) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
+	res, err := a.DB.ExecContext(ctx, `UPDATE refresh_tokens SET revoked = true WHERE token = $1`, a.Auth.Tokens.HashToken(refreshToken))
 	if err != nil {
 		return err
 	}
@@ -102,13 +103,13 @@ func (a *App) RevokeRefreshToken(refreshToken string) error {
 	return nil
 }
 
-func (a *App) RevokeAllRefreshTokens(refreshToken string) error {
-	userID, err := a.getUserIDForRefreshToken(refreshToken)
+func (a *App) RevokeAllRefreshTokens(ctx context.Context, refreshToken string) error {
+	userID, err := a.getUserIDForRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return err
 	}
 
-	res, err := a.DB.Exec(`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`, userID)
+	res, err := a.DB.ExecContext(ctx, `UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`, userID)
 	if err != nil {
 		return err
 	}
