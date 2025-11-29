@@ -23,6 +23,7 @@ type mockAuthService struct {
 	RevokeRefreshTokenFunc     func(ctx context.Context, refreshToken string) error
 	RevokeAllRefreshTokensFunc func(ctx context.Context, refreshToken string) error
 	GenerateDeviceUUIDFunc     func() string
+	CreateUserFunc             func(ctx context.Context, req *app.CreateUserRequest) (string, error)
 	GenerateAccessTokenFunc    func(userID int) (string, error)
 	ValidateAccessTokenFunc    func(tokenStr string) (*auth.Claims, error)
 }
@@ -49,6 +50,10 @@ func (a *mockAuthService) RevokeAllRefreshTokens(ctx context.Context, refreshTok
 
 func (a *mockAuthService) GenerateDeviceUUID() string {
 	return a.GenerateDeviceUUIDFunc()
+}
+
+func (a *mockAuthService) CreateUser(ctx context.Context, req *app.CreateUserRequest) (string, error) {
+	return a.CreateUserFunc(ctx, req)
 }
 
 func (a *mockAuthService) GenerateAccessToken(userID int) (string, error) {
@@ -144,7 +149,7 @@ func TestLoginHandler(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/login", strings.NewReader(tt.body))
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/login", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)
@@ -232,7 +237,7 @@ func TestRefreshAccessTokenHandler(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/logout", strings.NewReader(tt.body))
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)
@@ -304,7 +309,7 @@ func TestLogoutHandler(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/logout", strings.NewReader(tt.body))
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)
@@ -361,11 +366,69 @@ func TestLogoutAllHandler(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/logout/all", strings.NewReader(tt.body))
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout/all", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
 			h := NewAuthHandler(mockSvc)
 			h.LogOutAll(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
+			}
+		})
+	}
+}
+
+func TestSignUpHandler(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		publicID       string
+		err            error
+		expectedStatus int
+	}{
+		// pass
+		{
+			name:           "pass",
+			body:           `{"email":"user2@mail.com", "password":"Password123!"}`,
+			publicID:       "uuid",
+			err:            nil,
+			expectedStatus: http.StatusCreated,
+		},
+		// fail
+		{
+			name:           "invalid JSON",
+			body:           `invalid-json`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing email",
+			body:           `{"password":"Password123!"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing password",
+			body:           `{"email":"user2@mail.com"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockSvc := &mockAuthService{
+				CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (string, error) {
+					return tt.publicID, nil
+				},
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/signup", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+
+			h := NewAuthHandler(mockSvc)
+			h.CreateUser(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)

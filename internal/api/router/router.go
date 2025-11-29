@@ -16,11 +16,11 @@ func NewRouter(app *app.App) http.Handler {
 	r := mux.NewRouter()
 
 	api := r.PathPrefix("/api").Subrouter()
-	api.HandleFunc("/login", authHandler.Login).Methods("POST")
-	api.HandleFunc("/createuser", userHandler.CreateUser).Methods("POST")
-	api.HandleFunc("/refresh", authHandler.RefreshAccessToken).Methods("POST")
-	api.HandleFunc("/logout", authHandler.LogOut).Methods("POST")
-	api.HandleFunc("/logout/all", authHandler.LogOutAll).Methods("POST")
+	api.HandleFunc("/auth/login", authHandler.Login).Methods("POST")
+	api.HandleFunc("/auth/signup", authHandler.CreateUser).Methods("POST")
+	api.HandleFunc("/auth/refresh", authHandler.RefreshAccessToken).Methods("POST")
+	api.HandleFunc("/auth/logout", authHandler.LogOut).Methods("POST")
+	api.HandleFunc("/auth/logout/all", authHandler.LogOutAll).Methods("POST")
 	api.HandleFunc("/health", emptyHandler.Health).Methods("GET")
 
 	protected := r.PathPrefix("/api").Subrouter()

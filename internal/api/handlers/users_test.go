@@ -17,17 +17,12 @@ import (
 
 type mockUserService struct {
 	GetUserByIDFunc         func(ctx context.Context, userID int) (*app.User, error)
-	CreateUserFunc          func(ctx context.Context, req *app.CreateUserRequest) (*app.User, error)
 	GetPublicIDForUserFunc  func(ctx context.Context, userID int) (string, error)
 	GetUserIDByPublicIDFunc func(ctx context.Context, userPubID string) (int, error)
 }
 
 func (u *mockUserService) GetUserByID(ctx context.Context, userID int) (*app.User, error) {
 	return u.GetUserByIDFunc(ctx, userID)
-}
-
-func (u *mockUserService) CreateUser(ctx context.Context, req *app.CreateUserRequest) (*app.User, error) {
-	return u.CreateUserFunc(ctx, req)
 }
 
 func (u *mockUserService) GetPublicIDForUser(ctx context.Context, userID int) (string, error) {

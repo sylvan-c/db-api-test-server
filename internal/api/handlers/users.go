@@ -2,43 +2,12 @@ package handlers
 
 import (
 	"db-api-test-server/internal/api/contextkeys"
-	"db-api-test-server/internal/app"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
 )
-
-func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	var req app.CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
-		return
-	}
-
-	if req.Email == "" || req.Password == "" || req.FirstName == "" || req.LastName == "" {
-		http.Error(w, "Email, password, first name and last name are required", http.StatusBadRequest)
-		return
-	}
-
-	user, err := h.User.CreateUser(ctx, &req)
-	if err != nil {
-		if err == app.ErrPasswordInvalidFormat {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		} else {
-			log.Printf("Error creating user - %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	w.Header().Set("Location", fmt.Sprintf("/api/users/%d", user.ID))
-	respondJSON(w, user, http.StatusCreated)
-}
 
 func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

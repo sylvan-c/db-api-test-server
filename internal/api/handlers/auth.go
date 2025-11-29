@@ -4,6 +4,7 @@ import (
 	"db-api-test-server/internal/app"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 )
@@ -142,4 +143,33 @@ func (h *AuthHandler) LogOutAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, nil, http.StatusOK)
+}
+
+func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req app.CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	publicID, err := h.Auth.CreateUser(ctx, &req)
+	if err != nil {
+		if err == app.ErrPasswordInvalidFormat {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		} else {
+			log.Printf("Error creating user - %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Location", fmt.Sprintf("/api/users/%s", publicID))
+	respondJSON(w, publicID, http.StatusCreated)
 }

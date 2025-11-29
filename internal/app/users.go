@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"unicode"
 )
 
 type UserService interface {
 	GetUserByID(ctx context.Context, userID int) (*User, error)
-	CreateUser(ctx context.Context, req *CreateUserRequest) (*User, error)
 	GetPublicIDForUser(ctx context.Context, userID int) (string, error)
 	GetUserIDByPublicID(ctx context.Context, userPubID string) (int, error)
 }
@@ -18,13 +16,6 @@ type User struct {
 	ID        int    `json:"id"`
 	PublicID  string `json:"publicID"`
 	Email     string `json:"email"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-}
-
-type CreateUserRequest struct {
-	Email     string `json:"email"`
-	Password  string `json:"password"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 }
@@ -41,79 +32,6 @@ func (a *App) GetUserByID(ctx context.Context, userID int) (*User, error) {
 		return nil, err
 	}
 	return &user, nil
-}
-
-func (a *App) CreateUser(ctx context.Context, req *CreateUserRequest) (*User, error) {
-	if err := a.validatePassword(req.Password); err != nil {
-		return nil, err
-	}
-
-	hash, err := a.Auth.Passwords.HashPasswordSecure(req.Password)
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err := a.DB.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	var userID int
-	err = a.DB.QueryRowContext(
-		ctx,
-		"INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
-		req.Email,
-		hash,
-	).Scan(&userID)
-	if err != nil {
-		return nil, err
-	}
-
-	var userDetailsID int
-	err = a.DB.QueryRowContext(
-		ctx,
-		"INSERT INTO user_details (user_id, first_name, last_name) VALUES ($1, $2, $3) RETURNING id",
-		userID,
-		req.FirstName,
-		req.LastName,
-	).Scan(&userDetailsID)
-	if err != nil {
-		return nil, err
-	}
-	err = tx.Commit()
-	if err != nil {
-		return nil, err
-	}
-
-	return a.GetUserByID(ctx, userID)
-}
-
-func (a *App) validatePassword(password string) error {
-	type params struct {
-		number  bool
-		upper   bool
-		special bool
-		nChars  int
-	}
-	var p params
-	p.nChars = 0
-	for _, c := range password {
-		switch {
-		case unicode.IsNumber(c):
-			p.number = true
-		case unicode.IsUpper(c):
-			p.upper = true
-		case unicode.IsPunct(c) || unicode.IsSymbol(c):
-			p.special = true
-		default:
-		}
-		p.nChars++
-	}
-	if !p.number || !p.upper || !p.special || p.nChars < 8 || p.nChars > 64 {
-		return ErrPasswordInvalidFormat
-	}
-	return nil
 }
 
 func (a *App) GetPublicIDForUser(ctx context.Context, userID int) (string, error) {
