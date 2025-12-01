@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"db-api-test-server/internal/api/contextkeys"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -57,4 +58,47 @@ func (h *UserHandler) GetMeRedirect(w http.ResponseWriter, r *http.Request) {
 	redirectURL := fmt.Sprintf("/api/users/%s", userPubID)
 
 	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+}
+
+func (h *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var updates map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	log.Print(updates)
+	allowed := map[string]bool{
+		"firstName": true,
+		"lastName":  true,
+	}
+	if len(updates) == 0 {
+		log.Printf("Nothing to update")
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	for k := range updates {
+		if !allowed[k] {
+			http.Error(w, fmt.Sprintf("invalid option: %s", k), http.StatusBadRequest)
+			return
+		}
+	}
+	vars := mux.Vars(r)
+	userPubID := vars["id"]
+	userID, err := h.User.GetUserIDByPublicID(ctx, userPubID)
+	if err != nil {
+		log.Printf("invalid public id. public id: %s", userPubID)
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	user, err := h.User.UpdateProfile(ctx, userID, updates)
+	if err != nil {
+		log.Printf("UpdateProfile failed: %s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, user, http.StatusOK)
 }

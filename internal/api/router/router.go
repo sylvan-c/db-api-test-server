@@ -27,6 +27,7 @@ func NewRouter(app *app.App) http.Handler {
 	protected.Use(middleware.JWTMiddleware(authHandler))
 	protected.HandleFunc("/users/me", userHandler.GetMeRedirect).Methods("GET")
 	protected.HandleFunc("/users/{id}", userHandler.GetUser).Methods("GET")
+	protected.HandleFunc("/users/{id}", userHandler.UpdateProfile).Methods("PATCH")
 
 	return r
 }
