@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"log"
+	"unicode"
 
 	"github.com/google/uuid"
 )
@@ -19,8 +20,14 @@ type AuthService interface {
 	RevokeRefreshToken(ctx context.Context, refreshToken string) error
 	RevokeAllRefreshTokens(ctx context.Context, refreshToken string) error
 	GenerateDeviceUUID() string
+	CreateUser(ctx context.Context, req *CreateUserRequest) (string, error)
 	GenerateAccessToken(userID int) (string, error)
 	ValidateAccessToken(tokenStr string) (*auth.Claims, error)
+}
+
+type CreateUserRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
@@ -123,6 +130,58 @@ func (a *App) RevokeAllRefreshTokens(ctx context.Context, refreshToken string) e
 
 func (a *App) GenerateDeviceUUID() string {
 	return uuid.New().String()
+}
+
+func (a *App) CreateUser(ctx context.Context, req *CreateUserRequest) (string, error) {
+	if err := a.validatePassword(req.Password); err != nil {
+		return "", err
+	}
+
+	hash, err := a.Auth.Passwords.HashPasswordSecure(req.Password)
+	if err != nil {
+		return "", err
+	}
+
+	var userID int
+	var publicID string
+	err = a.DB.QueryRowContext(
+		ctx,
+		"INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, public_id",
+		req.Email,
+		hash,
+	).Scan(&userID, &publicID)
+	if err != nil {
+		return "", err
+	}
+
+	return publicID, nil
+}
+
+func (a *App) validatePassword(password string) error {
+	type params struct {
+		number  bool
+		upper   bool
+		special bool
+		nChars  int
+	}
+	var p params
+	p.nChars = 0
+	for _, c := range password {
+		switch {
+		case unicode.IsNumber(c):
+			p.number = true
+		case unicode.IsUpper(c):
+			p.upper = true
+		case unicode.IsPunct(c) || unicode.IsSymbol(c):
+			p.special = true
+		default:
+		}
+		p.nChars++
+	}
+	if !p.number || !p.upper || !p.special || p.nChars < 8 || p.nChars > 64 {
+		return ErrPasswordInvalidFormat
+	}
+	return nil
 }
 
 //auth methods

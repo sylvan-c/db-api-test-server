@@ -4,14 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"unicode"
+	"fmt"
+	"log"
+	"strings"
 )
 
 type UserService interface {
 	GetUserByID(ctx context.Context, userID int) (*User, error)
-	CreateUser(ctx context.Context, req *CreateUserRequest) (*User, error)
 	GetPublicIDForUser(ctx context.Context, userID int) (string, error)
 	GetUserIDByPublicID(ctx context.Context, userPubID string) (int, error)
+	UpdateProfile(ctx context.Context, userID int, updates map[string]any) (*User, error)
 }
 
 type User struct {
@@ -22,15 +24,15 @@ type User struct {
 	LastName  string `json:"lastName"`
 }
 
-type CreateUserRequest struct {
-	Email     string `json:"email"`
-	Password  string `json:"password"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
+type ValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
 }
 
 var ErrPasswordInvalidFormat = errors.New("password in invalid format")
 var ErrInvalidID = errors.New("invalid user public id")
+var ErrInvalidInput = errors.New("invalid input")
+var ErrUpdateFailed = errors.New("update failed")
 
 func (a *App) GetUserByID(ctx context.Context, userID int) (*User, error) {
 	var user User
@@ -41,79 +43,6 @@ func (a *App) GetUserByID(ctx context.Context, userID int) (*User, error) {
 		return nil, err
 	}
 	return &user, nil
-}
-
-func (a *App) CreateUser(ctx context.Context, req *CreateUserRequest) (*User, error) {
-	if err := a.validatePassword(req.Password); err != nil {
-		return nil, err
-	}
-
-	hash, err := a.Auth.Passwords.HashPasswordSecure(req.Password)
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err := a.DB.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	var userID int
-	err = a.DB.QueryRowContext(
-		ctx,
-		"INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
-		req.Email,
-		hash,
-	).Scan(&userID)
-	if err != nil {
-		return nil, err
-	}
-
-	var userDetailsID int
-	err = a.DB.QueryRowContext(
-		ctx,
-		"INSERT INTO user_details (user_id, first_name, last_name) VALUES ($1, $2, $3) RETURNING id",
-		userID,
-		req.FirstName,
-		req.LastName,
-	).Scan(&userDetailsID)
-	if err != nil {
-		return nil, err
-	}
-	err = tx.Commit()
-	if err != nil {
-		return nil, err
-	}
-
-	return a.GetUserByID(ctx, userID)
-}
-
-func (a *App) validatePassword(password string) error {
-	type params struct {
-		number  bool
-		upper   bool
-		special bool
-		nChars  int
-	}
-	var p params
-	p.nChars = 0
-	for _, c := range password {
-		switch {
-		case unicode.IsNumber(c):
-			p.number = true
-		case unicode.IsUpper(c):
-			p.upper = true
-		case unicode.IsPunct(c) || unicode.IsSymbol(c):
-			p.special = true
-		default:
-		}
-		p.nChars++
-	}
-	if !p.number || !p.upper || !p.special || p.nChars < 8 || p.nChars > 64 {
-		return ErrPasswordInvalidFormat
-	}
-	return nil
 }
 
 func (a *App) GetPublicIDForUser(ctx context.Context, userID int) (string, error) {
@@ -136,4 +65,68 @@ func (a *App) GetUserIDByPublicID(ctx context.Context, userPubID string) (int, e
 		return 0, err
 	}
 	return userID, nil
+}
+
+func (a *App) UpdateProfile(ctx context.Context, userID int, updates map[string]any) (*User, error) {
+	setClauses := []string{}
+	args := []any{}
+	i := 1
+	var colName string
+	for k, v := range updates {
+		switch k {
+		case "firstName":
+			colName = "first_name"
+		case "lastName":
+			colName = "last_name"
+		}
+
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", colName, i))
+		args = append(args, v)
+		i++
+	}
+	if errs := a.validateUserProfile(updates); errs != nil {
+		for _, e := range errs {
+			log.Printf("%s: %s", e.Field, e.Message)
+		}
+		return nil, ErrInvalidInput
+	}
+	args = append(args, userID)
+	query := fmt.Sprintf(`UPDATE user_details SET %s WHERE user_id = $%d RETURNING first_name, last_name`,
+		strings.Join(setClauses, ", "),
+		i)
+
+	log.Print(query)
+
+	row := a.DB.QueryRowContext(ctx, query, args...)
+	var user User
+	if err := row.Scan(&user.FirstName, &user.LastName); err != nil {
+		return nil, ErrUpdateFailed
+	}
+
+	return a.GetUserByID(ctx, userID)
+}
+
+func (a *App) validateUserProfile(updates map[string]any) []ValidationError {
+	var errs []ValidationError
+
+	for k, v := range updates {
+		switch k {
+		case "firstName", "lastName":
+			val, ok := v.(string)
+			if !ok {
+				errs = append(errs, ValidationError{
+					Field:   k,
+					Message: "incorrect type",
+				})
+			}
+			if len(val) < 2 || len(val) > 50 {
+				errs = append(errs, ValidationError{
+					Field:   k,
+					Message: "incorrect length - must be between 2 and 50 characters",
+				})
+			}
+		}
+	}
+
+	return errs
 }
