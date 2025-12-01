@@ -68,6 +68,10 @@ func (a *App) GetUserIDByPublicID(ctx context.Context, userPubID string) (int, e
 }
 
 func (a *App) UpdateProfile(ctx context.Context, userID int, updates map[string]any) (*User, error) {
+	if len(updates) == 0 {
+		return a.GetUserByID(ctx, userID)
+	}
+
 	setClauses := []string{}
 	args := []any{}
 	i := 1
