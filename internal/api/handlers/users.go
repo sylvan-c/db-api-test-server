@@ -73,11 +73,6 @@ func (h *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		"firstName": true,
 		"lastName":  true,
 	}
-	if len(updates) == 0 {
-		log.Printf("Nothing to update")
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
 	for k := range updates {
 		if !allowed[k] {
 			http.Error(w, fmt.Sprintf("invalid option: %s", k), http.StatusBadRequest)

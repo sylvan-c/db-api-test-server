@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"db-api-test-server/internal/api/contextkeys"
 	"db-api-test-server/internal/app"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"db-api-test-server/internal/api/contextkeys"
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
@@ -200,6 +199,27 @@ func TestUpdateProfileHandler(t *testing.T) {
 			expectedStatus: http.StatusOK,
 		},
 		{
+			name:     "empty body",
+			body:     `{}`,
+			publicID: "valid",
+			mockSetup: func() *mockUserService {
+				return &mockUserService{
+					GetUserIDByPublicIDFunc: func(ctx context.Context, publicID string) (int, error) {
+						return 1, nil
+					},
+					UpdateProfileFunc: func(ctx context.Context, userID int, updates map[string]any) (*app.User, error) {
+						return &app.User{
+							ID:        1,
+							PublicID:  "pub-1",
+							Email:     "alice@mail.com",
+							FirstName: "Alice",
+							LastName:  "Smith",
+						}, nil
+					},
+				}
+			}, expectedStatus: http.StatusOK,
+		},
+		{
 			name:     "invalid json",
 			body:     "invalid-json",
 			publicID: "valid",
@@ -214,19 +234,6 @@ func TestUpdateProfileHandler(t *testing.T) {
 			publicID: "valid",
 			mockSetup: func() *mockUserService {
 				return &mockUserService{}
-			},
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:     "empty body",
-			body:     `{}`,
-			publicID: "valid",
-			mockSetup: func() *mockUserService {
-				return &mockUserService{
-					GetUserIDByPublicIDFunc: func(ctx context.Context, pubID string) (int, error) {
-						return 1, nil
-					},
-				}
 			},
 			expectedStatus: http.StatusBadRequest,
 		},
