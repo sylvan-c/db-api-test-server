@@ -5,8 +5,8 @@ import (
 	"db-api-test-server/internal/app"
 	"db-api-test-server/internal/auth"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -49,6 +49,9 @@ func (a *mockAuthService) RevokeAllRefreshTokens(ctx context.Context, refreshTok
 }
 
 func (a *mockAuthService) GenerateDeviceUUID() string {
+	if a.GenerateDeviceUUIDFunc == nil {
+		return "default-uuid"
+	}
 	return a.GenerateDeviceUUIDFunc()
 }
 
@@ -64,374 +67,434 @@ func (a *mockAuthService) ValidateAccessToken(tokenStr string) (*auth.Claims, er
 	return a.ValidateAccessTokenFunc(tokenStr)
 }
 
+// ------------------- Login Tests -------------------
+
 func TestLoginHandler(t *testing.T) {
 	tests := []struct {
-		name                    string
-		body                    string
-		uuid                    string
-		userID                  int
-		accessToken             string
-		refreshToken            string
-		authenticateUserErr     error
-		generateAccessTokenErr  error
-		generateRefreshTokenErr error
-		expectedStatus          int
+		name           string
+		body           string
+		expectedStatus int
+		mockSetup      func() *mockAuthService
+		verify         func(t *testing.T, w *httptest.ResponseRecorder, usedUUID string, returnedUserID int)
 	}{
-		// pass
 		{
-			name:           "pass with uuid",
-			body:           `{"email":"valid-user@mail.com","password":"valid-password","deviceUUID":"input-uuid"}`,
-			uuid:           "generated-uuid",
-			userID:         1,
-			accessToken:    "valid-access-token",
-			refreshToken:   "valid-refresh-token",
+			name: "pass with uuid",
+			body: `{"email":"valid-user@mail.com","password":"valid-password","deviceUUID":"input-uuid"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					GenerateDeviceUUIDFunc: func() string { return "generated-uuid" },
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
+						return 1, nil
+					},
+					GenerateAccessTokenFunc: func(userID int) (string, error) {
+						return "valid-access-token", nil
+					},
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+						return "valid-refresh-token", nil
+					},
+				}
+			},
 			expectedStatus: http.StatusOK,
-		},
-		{
-			name:           "pass without uuid",
-			body:           `{"email":"valid-user@mail.com","password":"valid-password"}`,
-			uuid:           "generated-uuid",
-			userID:         1,
-			accessToken:    "valid-access-token",
-			refreshToken:   "valid-refresh-token",
-			expectedStatus: http.StatusOK,
-		},
-		// fail
-		{
-			name:           "invalid JSON",
-			body:           `invalid-json`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "missing password",
-			body:           `{"email":"valid-user@mail.com"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "missing email",
-			body:           `{"password":"password"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:                "invalid creds",
-			body:                `{"email":"invalid-user@mail.com","password":"invalid-password"}`,
-			userID:              0,
-			authenticateUserErr: app.ErrInvalidCredentials,
-			expectedStatus:      http.StatusUnauthorized,
-		},
-	}
-
-	for _, tt := range tests {
-		uuidFuncCalled := false
-		usedUUID := ""
-		returnedUserID := 0
-		t.Run(tt.name, func(t *testing.T) {
-			mockSvc := &mockAuthService{
-				GenerateDeviceUUIDFunc: func() string {
-					uuidFuncCalled = true
-					return tt.uuid
-				},
-				AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
-					returnedUserID = tt.userID
-					return tt.userID, tt.authenticateUserErr
-				},
-				GenerateAccessTokenFunc: func(userID int) (string, error) {
-					return tt.accessToken, tt.generateAccessTokenErr
-				},
-				GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
-					if deviceUUID != "" {
-						usedUUID = deviceUUID
-					}
-					return tt.refreshToken, tt.generateRefreshTokenErr
-				},
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/login", strings.NewReader(tt.body))
-			w := httptest.NewRecorder()
-
-			h := NewAuthHandler(mockSvc)
-			h.Login(w, req)
-
-			resp := w.Result()
-			defer resp.Body.Close()
-
-			bodyBytes, _ := io.ReadAll(resp.Body)
-
-			var body map[string]string
-			if w.Code == 200 {
-				err := json.Unmarshal(bodyBytes, &body)
+			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID string, returnedUserID int) {
+				assert.Equal(t, "input-uuid", usedUUID)
+				assert.Equal(t, 1, returnedUserID)
+				var body map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &body)
 				assert.NoError(t, err)
-			}
-
-			if tt.name == "pass with uuid" {
-				assert.False(t, uuidFuncCalled, "GenerateDeviceUUID should not be called when request includes UUID")
-				assert.Equal(t, "input-uuid", usedUUID, "handler should use input UUID")
-				assert.Equal(t, 1, returnedUserID, "returned user id should be 1")
-				assert.Equal(t, "valid-access-token", body["accessToken"], "returned access token should be valid-access-token")
-				assert.Equal(t, "valid-refresh-token", body["refreshToken"], "returned refresh token should be valid-refresh-token")
-			}
-			if tt.name == "pass without uuid" {
-				assert.True(t, uuidFuncCalled, "GenerateDeviceUUID should be called when request does not include UUID")
-				assert.Equal(t, "generated-uuid", usedUUID, "handler should use generated UUID")
-				assert.Equal(t, 1, returnedUserID, "returned user id should be 1")
-				assert.Equal(t, "valid-access-token", body["accessToken"], "returned access token should be valid-access-token")
-				assert.Equal(t, "valid-refresh-token", body["refreshToken"], "returned refresh token should be valid-refresh-token")
-			}
-			if tt.name == "invalid creds" {
-				assert.Equal(t, 0, returnedUserID, "returned user id should be 0")
-			}
-
-			if w.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
-			}
-		})
-	}
-}
-
-func TestRefreshAccessTokenHandler(t *testing.T) {
-	tests := []struct {
-		name           string
-		body           string
-		token          string
-		err            error
-		expectedStatus int
-	}{
-		// pass
+				assert.Equal(t, "valid-access-token", body["accessToken"])
+				assert.Equal(t, "valid-refresh-token", body["refreshToken"])
+			},
+		},
 		{
-			name:           "pass",
-			body:           `{"refreshToken":"valid-token"}`,
-			token:          "new-token",
-			err:            nil,
+			name: "pass without uuid",
+			body: `{"email":"valid-user@mail.com","password":"valid-password"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					GenerateDeviceUUIDFunc: func() string { return "generated-uuid" },
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
+						return 1, nil
+					},
+					GenerateAccessTokenFunc: func(userID int) (string, error) {
+						return "valid-access-token", nil
+					},
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+						return "valid-refresh-token", nil
+					},
+				}
+			},
 			expectedStatus: http.StatusOK,
-		},
-		// fail
-		{
-			name:           "invalid JSON",
-			body:           `invalid-json`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "missing refresh token",
-			body:           `{}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "service error",
-			body:           `{"refreshToken":"bad-token"}`,
-			err:            fmt.Errorf("failed to generate token"),
-			expectedStatus: http.StatusInternalServerError,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockSvc := &mockAuthService{
-				RefreshAccessTokenFunc: func(ctx context.Context, token string) (string, error) {
-					return tt.token, tt.err
-				},
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout", strings.NewReader(tt.body))
-			w := httptest.NewRecorder()
-
-			h := NewAuthHandler(mockSvc)
-			h.RefreshAccessToken(w, req)
-
-			resp := w.Result()
-			defer resp.Body.Close()
-
-			bodyBytes, _ := io.ReadAll(resp.Body)
-
-			var body map[string]string
-			if w.Code == 200 {
-				err := json.Unmarshal(bodyBytes, &body)
+			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID string, returnedUserID int) {
+				assert.Equal(t, "generated-uuid", usedUUID)
+				assert.Equal(t, 1, returnedUserID)
+				var body map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &body)
 				assert.NoError(t, err)
-			}
-
-			if tt.name == "pass" {
-				assert.Equal(t, "new-token", body["accessToken"])
-			}
-
-			if w.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
-			}
-		})
-	}
-}
-
-func TestLogoutHandler(t *testing.T) {
-	tests := []struct {
-		name           string
-		body           string
-		err            error
-		expectedStatus int
-	}{
-		// pass
-		{
-			name:           "pass",
-			body:           `{"refreshToken":"valid-token"}`,
-			err:            nil,
-			expectedStatus: http.StatusOK,
+				assert.Equal(t, "valid-access-token", body["accessToken"])
+				assert.Equal(t, "valid-refresh-token", body["refreshToken"])
+			},
 		},
-		// fail
 		{
 			name:           "invalid JSON",
 			body:           `invalid-json`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "missing refresh token",
-			body:           `{}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "service error",
-			body:           `{"refreshToken":"bad-token"}`,
-			err:            fmt.Errorf("failed to revoke refresh token"),
-			expectedStatus: http.StatusInternalServerError,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockSvc := &mockAuthService{
-				RevokeRefreshTokenFunc: func(ctx context.Context, token string) error {
-					return tt.err
-				},
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout", strings.NewReader(tt.body))
-			w := httptest.NewRecorder()
-
-			h := NewAuthHandler(mockSvc)
-			h.LogOut(w, req)
-
-			if w.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
-			}
-		})
-	}
-}
-
-func TestLogoutAllHandler(t *testing.T) {
-	tests := []struct {
-		name           string
-		body           string
-		err            error
-		expectedStatus int
-	}{
-		// pass
-		{
-			name:           "pass",
-			body:           `{"refreshToken":"valid-token"}`,
-			err:            nil,
-			expectedStatus: http.StatusOK,
-		},
-		// fail
-		{
-			name:           "invalid JSON",
-			body:           `invalid-json`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "missing refresh token",
-			body:           `{}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "service error",
-			body:           `{"refreshToken":"bad-token"}`,
-			err:            fmt.Errorf("failed to revoke refresh token"),
-			expectedStatus: http.StatusInternalServerError,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockSvc := &mockAuthService{
-				RevokeAllRefreshTokensFunc: func(ctx context.Context, token string) error {
-					return tt.err
-				},
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout/all", strings.NewReader(tt.body))
-			w := httptest.NewRecorder()
-
-			h := NewAuthHandler(mockSvc)
-			h.LogOutAll(w, req)
-
-			if w.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
-			}
-		})
-	}
-}
-
-func TestSignUpHandler(t *testing.T) {
-	tests := []struct {
-		name           string
-		body           string
-		publicID       string
-		err            error
-		expectedStatus int
-	}{
-		// pass
-		{
-			name:           "pass",
-			body:           `{"email":"user2@mail.com", "password":"Password123!"}`,
-			publicID:       "uuid",
-			err:            nil,
-			expectedStatus: http.StatusCreated,
-		},
-		// fail
-		{
-			name:           "invalid JSON",
-			body:           `invalid-json`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "missing email",
 			body:           `{"password":"Password123!"}`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "missing password",
-			body:           `{"email":"user2@mail.com"}`,
+			body:           `{"email":"user@mail.com"}`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
 			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid creds",
+			body: `{"email":"user@mail.com","password":"wrong"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
+						return 0, app.ErrInvalidCredentials
+					},
+				}
+			},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "GenerateAccessToken fails",
+			body: `{"email":"user@mail.com","password":"valid"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
+						return 1, nil
+					},
+					GenerateAccessTokenFunc: func(userID int) (string, error) {
+						return "", errors.New("token error")
+					},
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+						return "refresh", nil
+					},
+				}
+			},
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "GenerateRefreshToken fails",
+			body: `{"email":"user@mail.com","password":"valid"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
+						return 1, nil
+					},
+					GenerateAccessTokenFunc: func(userID int) (string, error) {
+						return "access", nil
+					},
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+						return "", errors.New("refresh error")
+					},
+				}
+			},
+			expectedStatus: http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockSvc := &mockAuthService{
-				CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (string, error) {
-					return tt.publicID, nil
-				},
-			}
-
+			mockSvc := tt.mockSetup()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
+			var usedUUID string
+			var returnedUserID int
+			// Wrap GenerateRefreshToken to capture UUID & userID
+			if mockSvc.GenerateRefreshTokenFunc != nil {
+				orig := mockSvc.GenerateRefreshTokenFunc
+				mockSvc.GenerateRefreshTokenFunc = func(ctx context.Context, userID int, uuid string) (string, error) {
+					usedUUID = uuid
+					returnedUserID = userID
+					return orig(ctx, userID, uuid)
+				}
+			}
+
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/login", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+			h := NewAuthHandler(mockSvc)
+			h.Login(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.verify != nil {
+				tt.verify(t, w, usedUUID, returnedUserID)
+			}
+		})
+	}
+}
+
+// ------------------- Refresh Access Token Tests -------------------
+
+func TestRefreshAccessTokenHandler(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		expectedStatus int
+		mockSetup      func() *mockAuthService
+		verify         func(t *testing.T, w *httptest.ResponseRecorder)
+	}{
+		{
+			name: "pass",
+			body: `{"refreshToken":"valid-token"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					RefreshAccessTokenFunc: func(ctx context.Context, token string) (string, error) {
+						return "new-token", nil
+					},
+				}
+			},
+			expectedStatus: http.StatusOK,
+			verify: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var body map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &body)
+				assert.NoError(t, err)
+				assert.Equal(t, "new-token", body["accessToken"])
+			},
+		},
+		{
+			name:           "invalid JSON",
+			body:           `invalid-json`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing refresh token",
+			body:           `{}`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "service error",
+			body: `{"refreshToken":"bad-token"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					RefreshAccessTokenFunc: func(ctx context.Context, token string) (string, error) {
+						return "", fmt.Errorf("failed to generate token")
+					},
+				}
+			},
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockSvc := tt.mockSetup()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/refresh", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+			h := NewAuthHandler(mockSvc)
+			h.RefreshAccessToken(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.verify != nil {
+				tt.verify(t, w)
+			}
+		})
+	}
+}
+
+// ------------------- Logout Tests -------------------
+
+func TestLogoutHandler(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		expectedStatus int
+		mockSetup      func() *mockAuthService
+	}{
+		{
+			name: "pass",
+			body: `{"refreshToken":"valid-token"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					RevokeRefreshTokenFunc: func(ctx context.Context, token string) error { return nil },
+				}
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "invalid JSON",
+			body:           `invalid-json`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing refresh token",
+			body:           `{}`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "service error",
+			body: `{"refreshToken":"bad-token"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					RevokeRefreshTokenFunc: func(ctx context.Context, token string) error {
+						return errors.New("failed to revoke")
+					},
+				}
+			},
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockSvc := tt.mockSetup()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+			h := NewAuthHandler(mockSvc)
+			h.LogOut(w, req)
+			assert.Equal(t, tt.expectedStatus, w.Code)
+		})
+	}
+}
+
+// ------------------- LogoutAll Tests -------------------
+
+func TestLogoutAllHandler(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		expectedStatus int
+		mockSetup      func() *mockAuthService
+	}{
+		{
+			name: "pass",
+			body: `{"refreshToken":"valid-token"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					RevokeAllRefreshTokensFunc: func(ctx context.Context, token string) error { return nil },
+				}
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "invalid JSON",
+			body:           `invalid-json`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing refresh token",
+			body:           `{}`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "service error",
+			body: `{"refreshToken":"bad-token"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					RevokeAllRefreshTokensFunc: func(ctx context.Context, token string) error {
+						return errors.New("failed to revoke all")
+					},
+				}
+			},
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockSvc := tt.mockSetup()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/logout/all", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+			h := NewAuthHandler(mockSvc)
+			h.LogOutAll(w, req)
+			assert.Equal(t, tt.expectedStatus, w.Code)
+		})
+	}
+}
+
+// ------------------- SignUp Tests -------------------
+
+func TestSignUpHandler(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		expectedStatus int
+		mockSetup      func() *mockAuthService
+		verify         func(t *testing.T, w *httptest.ResponseRecorder)
+	}{
+		{
+			name: "pass",
+			body: `{"email":"user2@mail.com","password":"Password123!"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (string, error) {
+						return "uuid", nil
+					},
+				}
+			},
+			expectedStatus: http.StatusCreated,
+			verify: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var body map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &body)
+				assert.NoError(t, err)
+				assert.Equal(t, "uuid", body["publicID"])
+			},
+		},
+		{
+			name:           "invalid JSON",
+			body:           `invalid-json`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing email",
+			body:           `{"password":"Password123!"}`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing password",
+			body:           `{"email":"user2@mail.com"}`,
+			mockSetup:      func() *mockAuthService { return &mockAuthService{} },
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "service error",
+			body: `{"email":"user2@mail.com","password":"Password123!"}`,
+			mockSetup: func() *mockAuthService {
+				return &mockAuthService{
+					CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (string, error) {
+						return "", errors.New("duplicate email")
+					},
+				}
+			},
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockSvc := tt.mockSetup()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/signup", strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
-
 			h := NewAuthHandler(mockSvc)
 			h.CreateUser(w, req)
 
-			if w.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.verify != nil {
+				tt.verify(t, w)
 			}
 		})
 	}

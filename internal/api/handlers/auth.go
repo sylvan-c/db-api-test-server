@@ -171,5 +171,5 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Location", fmt.Sprintf("/api/users/%s", publicID))
-	respondJSON(w, publicID, http.StatusCreated)
+	respondJSON(w, map[string]string{"publicID": publicID}, http.StatusCreated)
 }
