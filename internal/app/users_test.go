@@ -1,9 +1,8 @@
-package app_test
+package app
 
 import (
 	"context"
 	"database/sql"
-	"db-api-test-server/internal/app"
 	"errors"
 	"testing"
 
@@ -14,7 +13,7 @@ import (
 func TestGetUserByID(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	a := &app.App{DB: db}
+	a := &App{DB: db}
 
 	t.Run("success", func(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "public_id", "email", "first_name", "last_name"}).
@@ -43,7 +42,7 @@ func TestGetUserByID(t *testing.T) {
 func TestGetPublicIDForUser(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	a := &app.App{DB: db}
+	a := &App{DB: db}
 
 	t.Run("success", func(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"public_id"}).AddRow("pub-1")
@@ -58,7 +57,7 @@ func TestGetPublicIDForUser(t *testing.T) {
 		mock.ExpectQuery(`SELECT public_id FROM users WHERE id = \$1`).WithArgs(2).WillReturnError(sql.ErrNoRows)
 
 		pubID, err := a.GetPublicIDForUser(context.Background(), 2)
-		assert.ErrorIs(t, err, app.ErrInvalidID)
+		assert.ErrorIs(t, err, ErrInvalidID)
 		assert.Equal(t, "", pubID)
 	})
 }
@@ -66,7 +65,7 @@ func TestGetPublicIDForUser(t *testing.T) {
 func TestGetUserIDByPublicID(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	a := &app.App{DB: db}
+	a := &App{DB: db}
 
 	t.Run("success", func(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id"}).AddRow(42)
@@ -89,7 +88,7 @@ func TestGetUserIDByPublicID(t *testing.T) {
 func TestUpdateProfile(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	a := &app.App{DB: db}
+	a := &App{DB: db}
 
 	t.Run("success update both names", func(t *testing.T) {
 		mock.ExpectQuery(`UPDATE user_details SET first_name = \$1, last_name = \$2 WHERE user_id = \$3 RETURNING first_name, last_name`).
@@ -113,7 +112,7 @@ func TestUpdateProfile(t *testing.T) {
 			WillReturnError(errors.New("scan error"))
 
 		_, err := a.UpdateProfile(context.Background(), 1, map[string]any{"firstName": "Alice"})
-		assert.ErrorIs(t, err, app.ErrUpdateFailed)
+		assert.ErrorIs(t, err, ErrUpdateFailed)
 	})
 
 	t.Run("input validation", func(t *testing.T) {
@@ -123,10 +122,10 @@ func TestUpdateProfile(t *testing.T) {
 			wantError error
 			mockGet   bool // whether GetUserByID will be called (empty map)
 		}{
-			{"first name too short", map[string]any{"firstName": "A"}, app.ErrInvalidInput, false},
-			{"last name too long", map[string]any{"lastName": string(make([]byte, 51))}, app.ErrInvalidInput, false},
-			{"wrong type for first name", map[string]any{"firstName": 123}, app.ErrInvalidInput, false},
-			{"multiple errors", map[string]any{"firstName": "A", "lastName": 123}, app.ErrInvalidInput, false},
+			{"first name too short", map[string]any{"firstName": "A"}, ErrInvalidInput, false},
+			{"last name too long", map[string]any{"lastName": string(make([]byte, 51))}, ErrInvalidInput, false},
+			{"wrong type for first name", map[string]any{"firstName": 123}, ErrInvalidInput, false},
+			{"multiple errors", map[string]any{"firstName": "A", "lastName": 123}, ErrInvalidInput, false},
 			{"empty map", map[string]any{}, nil, true},
 		}
 
