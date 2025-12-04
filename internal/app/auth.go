@@ -7,6 +7,7 @@ import (
 	"db-api-test-server/internal/auth"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"unicode"
 
@@ -14,14 +15,13 @@ import (
 )
 
 type AuthService interface {
-	AuthenticateUser(ctx context.Context, email, password string) (int, error)
-	GenerateRefreshToken(ctx context.Context, userID int, deviceUUID string) (string, error)
+	AuthenticateUser(ctx context.Context, email, password string) (uuid.UUID, error)
+	GenerateRefreshToken(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
 	RefreshAccessToken(ctx context.Context, refreshToken string) (string, error)
 	RevokeRefreshToken(ctx context.Context, refreshToken string) error
 	RevokeAllRefreshTokens(ctx context.Context, refreshToken string) error
-	GenerateDeviceUUID() string
-	CreateUser(ctx context.Context, req *CreateUserRequest) (string, error)
-	GenerateAccessToken(userID int) (string, error)
+	CreateUser(ctx context.Context, req *CreateUserRequest) (uuid.UUID, error)
+	GenerateAccessToken(userID uuid.UUID) (string, error)
 	ValidateAccessToken(tokenStr string) (*auth.Claims, error)
 }
 
@@ -32,36 +32,43 @@ type CreateUserRequest struct {
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrInvalidRefreshToken = errors.New("invalid refresh token")
+var ErrInvalidPasswordFormat = errors.New("invalid password format")
 
-func (a *App) AuthenticateUser(ctx context.Context, email, password string) (int, error) {
-	var userID int
+func (a *App) AuthenticateUser(ctx context.Context, email, password string) (uuid.UUID, error) {
+	var userID uuid.UUID
 	var passwordHash string
 
 	err := a.DB.QueryRowContext(ctx, `SELECT id, password_hash FROM users WHERE email=$1`, email).
 		Scan(&userID, &passwordHash)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrInvalidCredentials
+		return uuid.Nil, ErrInvalidCredentials
 	} else if err != nil {
-		return 0, err
+		return uuid.Nil, err
 	}
 
 	if err := a.Auth.Passwords.AuthenticateUser(passwordHash, password); err != nil {
-		return 0, ErrInvalidCredentials
+		return uuid.Nil, ErrInvalidCredentials
 	}
 
 	return userID, nil
 }
 
-func (a *App) GenerateRefreshToken(ctx context.Context, userID int, deviceUUID string) (string, error) {
+func (a *App) GenerateRefreshToken(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	res, err := a.DB.ExecContext(ctx, `INSERT INTO refresh_tokens (user_id, device_uuid, token, expiry_tst, revoked) VALUES ($1, $2, $3, now()+INTERVAL '30 days', false)`, userID, deviceUUID, a.Auth.Tokens.HashToken(token))
+	rTokenID, err := uuid.NewV7()
 	if err != nil {
+		log.Printf("app.GenerateRefreshToken > uuid.NewV7: %s", err.Error())
+		return "", err
+	}
+	res, err := a.DB.ExecContext(ctx, `INSERT INTO refresh_tokens (id, user_id, device_uuid, token, expiry_tst, revoked) VALUES ($1, $2, $3, $4, now()+INTERVAL '30 days', false)`, rTokenID, userID, deviceUUID, a.Auth.Tokens.HashToken(token))
+	if err != nil {
+		log.Printf("app.GenerateRefreshToken > a.DB.ExecContext: %s", err.Error())
 		return "", err
 	}
 	count, err := res.RowsAffected()
@@ -73,14 +80,14 @@ func (a *App) GenerateRefreshToken(ctx context.Context, userID int, deviceUUID s
 	return token, nil
 }
 
-func (a *App) getUserIDForRefreshToken(ctx context.Context, refreshToken string) (int, error) {
-	var userID int
+func (a *App) getUserIDForRefreshToken(ctx context.Context, refreshToken string) (uuid.UUID, error) {
+	var userID uuid.UUID
 	err := a.DB.QueryRowContext(ctx, `SELECT user_id FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.Auth.Tokens.HashToken(refreshToken)).
 		Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrInvalidRefreshToken
+		return uuid.Nil, ErrInvalidRefreshToken
 	} else if err != nil {
-		return 0, err
+		return uuid.Nil, err
 	}
 	return userID, nil
 }
@@ -128,36 +135,67 @@ func (a *App) RevokeAllRefreshTokens(ctx context.Context, refreshToken string) e
 	return nil
 }
 
-func (a *App) GenerateDeviceUUID() string {
-	return uuid.New().String()
-}
-
-func (a *App) CreateUser(ctx context.Context, req *CreateUserRequest) (string, error) {
-	if err := a.validatePassword(req.Password); err != nil {
-		return "", err
+func (a *App) CreateUser(ctx context.Context, req *CreateUserRequest) (uuid.UUID, error) {
+	isValid, err := a.validatePassword(req.Password)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("could not validate password: %w", err)
+	}
+	if !isValid {
+		return uuid.Nil, ErrInvalidPasswordFormat
 	}
 
 	hash, err := a.Auth.Passwords.HashPasswordSecure(req.Password)
 	if err != nil {
-		return "", err
+		return uuid.Nil, fmt.Errorf("could not hash password: %w", err)
 	}
 
-	var userID int
-	var publicID string
-	err = a.DB.QueryRowContext(
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("could not begin transaction: %w", err)
+	}
+
+	defer tx.Rollback()
+
+	userID, err := uuid.NewV7()
+	if err != nil {
+		log.Printf("app.CreateUser > uuid.NewV7: %s", err.Error())
+		return uuid.Nil, err
+	}
+
+	_, err = tx.ExecContext(
 		ctx,
-		"INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, public_id",
+		"INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)",
+		userID,
 		req.Email,
 		hash,
-	).Scan(&userID, &publicID)
+	)
 	if err != nil {
-		return "", err
+		return uuid.Nil, fmt.Errorf("insert user failed: %w", err)
 	}
 
-	return publicID, nil
+	userDetailsID, err := uuid.NewV7()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("uuid generation failed: %w", err)
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		"INSERT INTO user_details (id, user_id) VALUES ($1, $2)",
+		userDetailsID,
+		userID,
+	)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("insert user details failed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return uuid.Nil, fmt.Errorf("could not commit transaction: %w", err)
+	}
+
+	return userID, nil
 }
 
-func (a *App) validatePassword(password string) error {
+func (a *App) validatePassword(password string) (bool, error) {
 	type params struct {
 		number  bool
 		upper   bool
@@ -179,14 +217,14 @@ func (a *App) validatePassword(password string) error {
 		p.nChars++
 	}
 	if !p.number || !p.upper || !p.special || p.nChars < 8 || p.nChars > 64 {
-		return ErrPasswordInvalidFormat
+		return false, ErrPasswordInvalidFormat
 	}
-	return nil
+	return true, nil
 }
 
 //auth methods
 
-func (a *App) GenerateAccessToken(userID int) (string, error) {
+func (a *App) GenerateAccessToken(userID uuid.UUID) (string, error) {
 	return a.Auth.Tokens.GenerateAccessToken(userID)
 }
 

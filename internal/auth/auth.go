@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -22,7 +23,7 @@ type AuthAdapter struct {
 // Token stuff
 
 type TokenGenerator interface {
-	GenerateAccessToken(userID int) (string, error)
+	GenerateAccessToken(userID uuid.UUID) (string, error)
 	ValidateAccessToken(tokenStr string) (*Claims, error)
 	HashToken(token string) string
 }
@@ -36,11 +37,11 @@ func NewJWTAuth(secret string) TokenGenerator {
 }
 
 type Claims struct {
-	UserID int `json:"userID"`
+	UserID uuid.UUID `json:"userID"`
 	jwt.RegisteredClaims
 }
 
-func (j *JWTAuth) GenerateAccessToken(userID int) (string, error) {
+func (j *JWTAuth) GenerateAccessToken(userID uuid.UUID) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
