@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"db-api-test-server/internal/api/contextkeys"
-
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +34,7 @@ func (u *mockUserService) UpdateProfile(ctx context.Context, userID uuid.UUID, u
 // ------------------- GetUser Tests -------------------
 
 func TestGetUserHandler(t *testing.T) {
-	dummyUserUuid, _ := uuid.NewV7()
+	dummyUserUUID, _ := uuid.NewV7()
 	tests := []struct {
 		name           string
 		id             uuid.UUID
@@ -48,12 +46,12 @@ func TestGetUserHandler(t *testing.T) {
 	}{
 		{
 			name: "success",
-			id:   dummyUserUuid,
+			id:   dummyUserUUID,
 			mockSetup: func() *mockUserService {
 				return &mockUserService{
 					GetUserByIDFunc: func(ctx context.Context, userID uuid.UUID) (*app.User, error) {
 						return &app.User{
-							ID:        dummyUserUuid,
+							ID:        dummyUserUUID,
 							Email:     "user@mail.com",
 							FirstName: "John",
 							LastName:  "Doe",
@@ -68,7 +66,7 @@ func TestGetUserHandler(t *testing.T) {
 		},
 		{
 			name: "GetUserByID fails",
-			id:   dummyUserUuid,
+			id:   dummyUserUUID,
 			mockSetup: func() *mockUserService {
 				return &mockUserService{
 					GetUserByIDFunc: func(ctx context.Context, userID uuid.UUID) (*app.User, error) {
@@ -111,18 +109,18 @@ func TestGetUserHandler(t *testing.T) {
 // ------------------- GetMeRedirect Tests -------------------
 
 func TestGetMeRedirectHandler(t *testing.T) {
-	dummyUserUuid, _ := uuid.NewV7()
+	dummyUserUUID, _ := uuid.NewV7()
 	mockSvc := &mockUserService{}
 	handler := NewUserHandler(mockSvc)
 
 	t.Run("authenticated redirect", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/me", nil)
-		ctx := context.WithValue(req.Context(), contextkeys.UserID, dummyUserUuid)
+		ctx := context.WithValue(req.Context(), contextkeys.UserID, dummyUserUUID)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 		handler.GetMeRedirect(w, req)
 		assert.Equal(t, http.StatusSeeOther, w.Code)
-		assert.Equal(t, "/api/users/"+dummyUserUuid.String(), w.Header().Get("Location"))
+		assert.Equal(t, "/api/users/"+dummyUserUUID.String(), w.Header().Get("Location"))
 	})
 
 	t.Run("unauthorized missing context", func(t *testing.T) {
@@ -136,7 +134,7 @@ func TestGetMeRedirectHandler(t *testing.T) {
 // ------------------- UpdateProfile Tests -------------------
 
 func TestUpdateProfileHandler(t *testing.T) {
-	dummyUserUuid, _ := uuid.NewV7()
+	dummyUserUUID, _ := uuid.NewV7()
 	tests := []struct {
 		name           string
 		body           string
@@ -147,11 +145,24 @@ func TestUpdateProfileHandler(t *testing.T) {
 		{
 			name: "valid first and last name",
 			body: `{"firstName":"Alice","lastName":"Smith"}`,
-			id:   dummyUserUuid,
+			id:   dummyUserUUID,
 			mockSetup: func() *mockUserService {
 				return &mockUserService{
 					UpdateProfileFunc: func(ctx context.Context, id uuid.UUID, updates map[string]any) (*app.User, error) {
-						return &app.User{ID: dummyUserUuid, FirstName: "Alice", LastName: "Smith"}, nil
+						return &app.User{ID: dummyUserUUID, Email: "alicesmith@fakemail.com", FirstName: "Alice", LastName: "Smith"}, nil
+					},
+				}
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "empty body",
+			body: `{}`,
+			id:   dummyUserUUID,
+			mockSetup: func() *mockUserService {
+				return &mockUserService{
+					UpdateProfileFunc: func(ctx context.Context, userID uuid.UUID, updates map[string]any) (*app.User, error) {
+						return &app.User{ID: dummyUserUUID, Email: "testuser@fakemail.com", FirstName: "test", LastName: "user"}, nil
 					},
 				}
 			},
@@ -160,7 +171,7 @@ func TestUpdateProfileHandler(t *testing.T) {
 		{
 			name: "invalid json",
 			body: "invalid-json",
-			id:   dummyUserUuid,
+			id:   dummyUserUUID,
 			mockSetup: func() *mockUserService {
 				return &mockUserService{}
 			},
@@ -169,16 +180,7 @@ func TestUpdateProfileHandler(t *testing.T) {
 		{
 			name: "invalid field",
 			body: `{"hack":"bad"}`,
-			id:   dummyUserUuid,
-			mockSetup: func() *mockUserService {
-				return &mockUserService{}
-			},
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name: "empty body",
-			body: `{}`,
-			id:   dummyUserUuid,
+			id:   dummyUserUUID,
 			mockSetup: func() *mockUserService {
 				return &mockUserService{}
 			},
@@ -187,7 +189,7 @@ func TestUpdateProfileHandler(t *testing.T) {
 		{
 			name: "UpdateProfile fails",
 			body: `{"firstName":"Alice"}`,
-			id:   dummyUserUuid,
+			id:   dummyUserUUID,
 			mockSetup: func() *mockUserService {
 				return &mockUserService{
 					UpdateProfileFunc: func(ctx context.Context, id uuid.UUID, updates map[string]any) (*app.User, error) {

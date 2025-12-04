@@ -42,6 +42,7 @@ type Claims struct {
 }
 
 func (j *JWTAuth) GenerateAccessToken(userID uuid.UUID) (string, error) {
+	now := time.Now()
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
