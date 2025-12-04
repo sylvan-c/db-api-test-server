@@ -8,11 +8,11 @@ import (
 
 type App struct {
 	DB     db.DBAdapter
-	Auth   auth.AuthAdapter
+	Auth   *auth.AuthAdapter
 	Client external.ClientService
 }
 
-func New(db db.DBAdapter, auth auth.AuthAdapter, client external.ClientService) *App {
+func New(db db.DBAdapter, auth *auth.AuthAdapter, client external.ClientService) *App {
 	return &App{
 		DB:     db,
 		Auth:   auth,

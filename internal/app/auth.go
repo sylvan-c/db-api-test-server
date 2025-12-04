@@ -99,7 +99,7 @@ func (a *App) RefreshAccessToken(ctx context.Context, refreshToken string) (stri
 	}
 	accessToken, err := a.Auth.Tokens.GenerateAccessToken(userID)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 	return accessToken, nil
 }
