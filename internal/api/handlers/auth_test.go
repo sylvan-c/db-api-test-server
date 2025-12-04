@@ -13,26 +13,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
 type mockAuthService struct {
-	AuthenticateUserFunc       func(ctx context.Context, email, password string) (int, error)
-	GenerateRefreshTokenFunc   func(ctx context.Context, userID int, deviceUUID string) (string, error)
+	AuthenticateUserFunc       func(ctx context.Context, email, password string) (uuid.UUID, error)
+	GenerateRefreshTokenFunc   func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
 	RefreshAccessTokenFunc     func(ctx context.Context, refreshToken string) (string, error)
 	RevokeRefreshTokenFunc     func(ctx context.Context, refreshToken string) error
 	RevokeAllRefreshTokensFunc func(ctx context.Context, refreshToken string) error
 	GenerateDeviceUUIDFunc     func() string
-	CreateUserFunc             func(ctx context.Context, req *app.CreateUserRequest) (string, error)
-	GenerateAccessTokenFunc    func(userID int) (string, error)
+	CreateUserFunc             func(ctx context.Context, req *app.CreateUserRequest) (uuid.UUID, error)
+	GenerateAccessTokenFunc    func(userID uuid.UUID) (string, error)
 	ValidateAccessTokenFunc    func(tokenStr string) (*auth.Claims, error)
 }
 
-func (a *mockAuthService) AuthenticateUser(ctx context.Context, email, password string) (int, error) {
+func (a *mockAuthService) AuthenticateUser(ctx context.Context, email, password string) (uuid.UUID, error) {
 	return a.AuthenticateUserFunc(ctx, email, password)
 }
 
-func (a *mockAuthService) GenerateRefreshToken(ctx context.Context, userID int, deviceUUID string) (string, error) {
+func (a *mockAuthService) GenerateRefreshToken(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 	return a.GenerateRefreshTokenFunc(ctx, userID, deviceUUID)
 }
 
@@ -55,11 +56,11 @@ func (a *mockAuthService) GenerateDeviceUUID() string {
 	return a.GenerateDeviceUUIDFunc()
 }
 
-func (a *mockAuthService) CreateUser(ctx context.Context, req *app.CreateUserRequest) (string, error) {
+func (a *mockAuthService) CreateUser(ctx context.Context, req *app.CreateUserRequest) (uuid.UUID, error) {
 	return a.CreateUserFunc(ctx, req)
 }
 
-func (a *mockAuthService) GenerateAccessToken(userID int) (string, error) {
+func (a *mockAuthService) GenerateAccessToken(userID uuid.UUID) (string, error) {
 	return a.GenerateAccessTokenFunc(userID)
 }
 
@@ -70,34 +71,35 @@ func (a *mockAuthService) ValidateAccessToken(tokenStr string) (*auth.Claims, er
 // ------------------- Login Tests -------------------
 
 func TestLoginHandler(t *testing.T) {
+	dummyDeviceUuid, _ := uuid.NewV7()
+	dummyUserUuid, _ := uuid.NewV7()
 	tests := []struct {
 		name           string
 		body           string
 		expectedStatus int
 		mockSetup      func() *mockAuthService
-		verify         func(t *testing.T, w *httptest.ResponseRecorder, usedUUID string, returnedUserID int)
+		verify         func(t *testing.T, w *httptest.ResponseRecorder, usedUUID uuid.UUID, returnedUserID uuid.UUID)
 	}{
 		{
 			name: "pass with uuid",
-			body: `{"email":"valid-user@mail.com","password":"valid-password","deviceUUID":"input-uuid"}`,
+			body: fmt.Sprintf(`{"email":"valid-user@mail.com","password":"valid-password","deviceUUID":"%s"}`, dummyDeviceUuid.String()),
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					GenerateDeviceUUIDFunc: func() string { return "generated-uuid" },
-					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
-						return 1, nil
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
+						return dummyUserUuid, nil
 					},
-					GenerateAccessTokenFunc: func(userID int) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "valid-access-token", nil
 					},
-					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "valid-refresh-token", nil
 					},
 				}
 			},
 			expectedStatus: http.StatusOK,
-			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID string, returnedUserID int) {
-				assert.Equal(t, "input-uuid", usedUUID)
-				assert.Equal(t, 1, returnedUserID)
+			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID uuid.UUID, returnedUserID uuid.UUID) {
+				assert.Equal(t, dummyDeviceUuid, usedUUID)
+				assert.Equal(t, dummyUserUuid, returnedUserID)
 				var body map[string]string
 				err := json.Unmarshal(w.Body.Bytes(), &body)
 				assert.NoError(t, err)
@@ -110,22 +112,21 @@ func TestLoginHandler(t *testing.T) {
 			body: `{"email":"valid-user@mail.com","password":"valid-password"}`,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					GenerateDeviceUUIDFunc: func() string { return "generated-uuid" },
-					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
-						return 1, nil
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
+						return dummyUserUuid, nil
 					},
-					GenerateAccessTokenFunc: func(userID int) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "valid-access-token", nil
 					},
-					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "valid-refresh-token", nil
 					},
 				}
 			},
 			expectedStatus: http.StatusOK,
-			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID string, returnedUserID int) {
-				assert.Equal(t, "generated-uuid", usedUUID)
-				assert.Equal(t, 1, returnedUserID)
+			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID uuid.UUID, returnedUserID uuid.UUID) {
+				assert.NotEqual(t, dummyDeviceUuid, usedUUID)
+				assert.Equal(t, dummyUserUuid, returnedUserID)
 				var body map[string]string
 				err := json.Unmarshal(w.Body.Bytes(), &body)
 				assert.NoError(t, err)
@@ -156,8 +157,8 @@ func TestLoginHandler(t *testing.T) {
 			body: `{"email":"user@mail.com","password":"wrong"}`,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
-						return 0, app.ErrInvalidCredentials
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
+						return uuid.Nil, app.ErrInvalidCredentials
 					},
 				}
 			},
@@ -168,13 +169,13 @@ func TestLoginHandler(t *testing.T) {
 			body: `{"email":"user@mail.com","password":"valid"}`,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
-						return 1, nil
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
+						return dummyUserUuid, nil
 					},
-					GenerateAccessTokenFunc: func(userID int) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "", errors.New("token error")
 					},
-					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "refresh", nil
 					},
 				}
@@ -186,13 +187,13 @@ func TestLoginHandler(t *testing.T) {
 			body: `{"email":"user@mail.com","password":"valid"}`,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					AuthenticateUserFunc: func(ctx context.Context, email, password string) (int, error) {
-						return 1, nil
+					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
+						return dummyUserUuid, nil
 					},
-					GenerateAccessTokenFunc: func(userID int) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "access", nil
 					},
-					GenerateRefreshTokenFunc: func(ctx context.Context, userID int, deviceUUID string) (string, error) {
+					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "", errors.New("refresh error")
 					},
 				}
@@ -207,12 +208,12 @@ func TestLoginHandler(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			var usedUUID string
-			var returnedUserID int
+			var usedUUID uuid.UUID
+			var returnedUserID uuid.UUID
 			// Wrap GenerateRefreshToken to capture UUID & userID
 			if mockSvc.GenerateRefreshTokenFunc != nil {
 				orig := mockSvc.GenerateRefreshTokenFunc
-				mockSvc.GenerateRefreshTokenFunc = func(ctx context.Context, userID int, uuid string) (string, error) {
+				mockSvc.GenerateRefreshTokenFunc = func(ctx context.Context, userID uuid.UUID, uuid uuid.UUID) (string, error) {
 					usedUUID = uuid
 					returnedUserID = userID
 					return orig(ctx, userID, uuid)
@@ -425,6 +426,7 @@ func TestLogoutAllHandler(t *testing.T) {
 // ------------------- SignUp Tests -------------------
 
 func TestSignUpHandler(t *testing.T) {
+	dummyUuid, _ := uuid.NewV7()
 	tests := []struct {
 		name           string
 		body           string
@@ -437,8 +439,8 @@ func TestSignUpHandler(t *testing.T) {
 			body: `{"email":"user2@mail.com","password":"Password123!"}`,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (string, error) {
-						return "uuid", nil
+					CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (uuid.UUID, error) {
+						return dummyUuid, nil
 					},
 				}
 			},
@@ -447,7 +449,7 @@ func TestSignUpHandler(t *testing.T) {
 				var body map[string]string
 				err := json.Unmarshal(w.Body.Bytes(), &body)
 				assert.NoError(t, err)
-				assert.Equal(t, "uuid", body["publicID"])
+				assert.Equal(t, dummyUuid.String(), body["userID"])
 			},
 		},
 		{
@@ -473,8 +475,8 @@ func TestSignUpHandler(t *testing.T) {
 			body: `{"email":"user2@mail.com","password":"Password123!"}`,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (string, error) {
-						return "", errors.New("duplicate email")
+					CreateUserFunc: func(ctx context.Context, req *app.CreateUserRequest) (uuid.UUID, error) {
+						return uuid.Nil, errors.New("duplicate email")
 					},
 				}
 			},

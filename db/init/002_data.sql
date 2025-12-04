@@ -1,1 +1,2 @@
--- INSERT INTO Test_Table (Test_Column) VALUES ('abc');
+INSERT INTO users (id, email, password_hash) VALUES ('019ae476-333c-7b04-beb1-cb52fc141cff', 'user1@fakemail.com','$argon2id$v=19$m=65536,t=2,p=4$yzigST7BON0e+huQDg2Y4Q$iScZ8I1MRYNvjzG5H+E7CCfsZd5X3juONZXtwyqrhBE');
+INSERT INTO user_details (id, user_id, first_name, last_name) VALUES('019aea8c-0e06-776b-b2ae-82d6966d4991', '019ae476-333c-7b04-beb1-cb52fc141cff', 'testFN', 'testLN');

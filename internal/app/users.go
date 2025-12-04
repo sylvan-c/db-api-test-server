@@ -7,21 +7,20 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type UserService interface {
-	GetUserByID(ctx context.Context, userID int) (*User, error)
-	GetPublicIDForUser(ctx context.Context, userID int) (string, error)
-	GetUserIDByPublicID(ctx context.Context, userPubID string) (int, error)
-	UpdateProfile(ctx context.Context, userID int, updates map[string]any) (*User, error)
+	GetUserByID(ctx context.Context, userID uuid.UUID) (*User, error)
+	UpdateProfile(ctx context.Context, userID uuid.UUID, updates map[string]any) (*User, error)
 }
 
 type User struct {
-	ID        int    `json:"id"`
-	PublicID  string `json:"publicID"`
-	Email     string `json:"email"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
+	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
+	FirstName string    `json:"firstName"`
+	LastName  string    `json:"lastName"`
 }
 
 type ValidationError struct {
@@ -30,84 +29,88 @@ type ValidationError struct {
 }
 
 var ErrPasswordInvalidFormat = errors.New("password in invalid format")
-var ErrInvalidID = errors.New("invalid user public id")
 var ErrInvalidInput = errors.New("invalid input")
 var ErrUpdateFailed = errors.New("update failed")
+var ErrUnmappedKey = errors.New("unmapped key")
 
-func (a *App) GetUserByID(ctx context.Context, userID int) (*User, error) {
+func (a *App) GetUserByID(ctx context.Context, userID uuid.UUID) (*User, error) {
 	var user User
-
-	err := a.DB.QueryRowContext(ctx, `SELECT U.id, U.public_id, U.email, UD.first_name, UD.last_name FROM Users U JOIN User_Details UD ON U.id = UD.user_id WHERE U.id = $1`, userID).
-		Scan(&user.ID, &user.PublicID, &user.Email, &user.FirstName, &user.LastName)
+	log.Printf("%s", userID.String())
+	err := a.DB.QueryRowContext(ctx, `SELECT U.id, U.email, UD.first_name, UD.last_name FROM Users U JOIN User_Details UD ON U.id = UD.user_id WHERE U.id = $1`, userID).
+		Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName)
 	if err != nil {
+		log.Printf("GetUserByID - %s", err.Error())
 		return nil, err
 	}
 	return &user, nil
 }
 
-func (a *App) GetPublicIDForUser(ctx context.Context, userID int) (string, error) {
-	var userPubID string
-	err := a.DB.QueryRowContext(ctx, `SELECT public_id FROM users WHERE id = $1`, userID).
-		Scan(&userPubID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrInvalidID
-	} else if err != nil {
-		return "", err
-	}
-	return userPubID, nil
-}
-
-func (a *App) GetUserIDByPublicID(ctx context.Context, userPubID string) (int, error) {
-	var userID int
-	err := a.DB.QueryRowContext(ctx, `SELECT id FROM users WHERE public_id = $1`, userPubID).
-		Scan(&userID)
-	if err != nil {
-		return 0, err
-	}
-	return userID, nil
-}
-
-func (a *App) UpdateProfile(ctx context.Context, userID int, updates map[string]any) (*User, error) {
+func (a *App) UpdateProfile(ctx context.Context, userID uuid.UUID, updates map[string]any) (*User, error) {
 	if len(updates) == 0 {
 		return a.GetUserByID(ctx, userID)
 	}
 
-	setClauses := []string{}
-	args := []any{}
-	i := 1
-	var colName string
-	for k, v := range updates {
-		switch k {
-		case "firstName":
-			colName = "first_name"
-		case "lastName":
-			colName = "last_name"
-		}
-
-		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", colName, i))
-		args = append(args, v)
-		i++
-	}
-	if errs := a.validateUserProfile(updates); errs != nil {
+	if errs := a.validateUserProfile(updates); len(errs) > 0 {
 		for _, e := range errs {
-			log.Printf("%s: %s", e.Field, e.Message)
+			log.Printf("Validation Error: %s: %s", e.Field, e.Message)
 		}
 		return nil, ErrInvalidInput
 	}
-	args = append(args, userID)
-	query := fmt.Sprintf(`UPDATE user_details SET %s WHERE user_id = $%d RETURNING first_name, last_name`,
-		strings.Join(setClauses, ", "),
-		i)
 
-	log.Print(query)
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
 
-	row := a.DB.QueryRowContext(ctx, query, args...)
 	var user User
-	if err := row.Scan(&user.FirstName, &user.LastName); err != nil {
-		return nil, ErrUpdateFailed
+	err = tx.QueryRowContext(ctx, "SELECT id, email FROM users WHERE id = $1", userID).
+		Scan(&user.ID, &user.Email)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve user for update: %w", err)
 	}
 
-	return a.GetUserByID(ctx, userID)
+	setClauses := []string{}
+	args := []any{}
+	bindCount := 1
+	var jsonColMap = map[string]string{
+		"firstName": "first_name",
+		"lastName":  "last_name",
+	}
+	for k, v := range updates {
+		colName, ok := jsonColMap[k]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", ErrUnmappedKey, k)
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", colName, bindCount))
+		args = append(args, v)
+		bindCount++
+	}
+
+	args = append(args, userID)
+
+	updateQuery := fmt.Sprintf(`
+			UPDATE user_details 
+			SET %s 
+			WHERE user_id = $%d 
+			RETURNING first_name, last_name`,
+		strings.Join(setClauses, ", "),
+		bindCount)
+
+	row := tx.QueryRowContext(ctx, updateQuery, args...)
+
+	if err := row.Scan(&user.FirstName, &user.LastName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: user details row not found for ID %s", ErrUpdateFailed, userID)
+		}
+		return nil, fmt.Errorf("%w: scan failed after update: %w", ErrUpdateFailed, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &user, nil
 }
 
 func (a *App) validateUserProfile(updates map[string]any) []ValidationError {

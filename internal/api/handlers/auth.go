@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 type loginRequest struct {
-	Email      string `json:"email"`
-	Password   string `json:"password"`
-	DeviceUUID string `json:"deviceUUID"`
+	Email      string    `json:"email"`
+	Password   string    `json:"password"`
+	DeviceUUID uuid.UUID `json:"deviceUUID"`
 }
 
 type refreshRequest struct {
@@ -20,9 +22,9 @@ type refreshRequest struct {
 }
 
 type loginResponse struct {
-	AccessToken  string `json:"accessToken,omitempty"`
-	RefreshToken string `json:"refreshToken,omitempty"`
-	DeviceUUID   string `json:"deviceUUID,omitempty"`
+	AccessToken  string     `json:"accessToken,omitempty"`
+	RefreshToken string     `json:"refreshToken,omitempty"`
+	DeviceUUID   *uuid.UUID `json:"deviceUUID,omitempty"`
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -46,8 +48,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deviceUUID := req.DeviceUUID
-	if deviceUUID == "" {
-		deviceUUID = h.Auth.GenerateDeviceUUID()
+	var err error
+	if deviceUUID == uuid.Nil {
+		deviceUUID, err = uuid.NewV7()
+		if err != nil {
+			log.Printf("error generating device uuid - %s", err.Error())
+			http.Error(w, "internal server error", http.StatusBadRequest)
+		}
 	}
 
 	userID, err := h.Auth.AuthenticateUser(ctx, req.Email, req.Password)
@@ -70,7 +77,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
 		return
 	}
-	respondJSON(w, loginResponse{AccessToken: accessToken, RefreshToken: refreshToken, DeviceUUID: deviceUUID}, http.StatusOK)
+	respondJSON(w, loginResponse{AccessToken: accessToken, RefreshToken: refreshToken, DeviceUUID: &deviceUUID}, http.StatusOK)
 }
 
 func (h *AuthHandler) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +166,7 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	publicID, err := h.Auth.CreateUser(ctx, &req)
+	userID, err := h.Auth.CreateUser(ctx, &req)
 	if err != nil {
 		if err == app.ErrPasswordInvalidFormat {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -170,6 +177,6 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Location", fmt.Sprintf("/api/users/%s", publicID))
-	respondJSON(w, map[string]string{"publicID": publicID}, http.StatusCreated)
+	w.Header().Set("Location", fmt.Sprintf("/api/users/%s", userID))
+	respondJSON(w, map[string]uuid.UUID{"userID": userID}, http.StatusCreated)
 }
