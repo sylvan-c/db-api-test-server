@@ -54,7 +54,7 @@ func (h *UserHandler) GetMeRedirect(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	var updates map[string]any
+	updates := make(map[string]any)
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return

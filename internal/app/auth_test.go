@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"db-api-test-server/internal/auth"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -34,7 +36,7 @@ func (m *mockPasswords) HashPasswordSecure(password string) (string, error) {
 
 type mockTokens struct {
 	HashTokenFunc           func(token string) string
-	GenerateAccessTokenFunc func(userID int) (string, error)
+	GenerateAccessTokenFunc func(userID uuid.UUID) (string, error)
 	ValidateAccessTokenFunc func(token string) (*auth.Claims, error)
 }
 
@@ -45,7 +47,7 @@ func (m *mockTokens) HashToken(token string) string {
 	return token
 }
 
-func (m *mockTokens) GenerateAccessToken(userID int) (string, error) {
+func (m *mockTokens) GenerateAccessToken(userID uuid.UUID) (string, error) {
 	if m.GenerateAccessTokenFunc != nil {
 		return m.GenerateAccessTokenFunc(userID)
 	}
@@ -56,7 +58,8 @@ func (m *mockTokens) ValidateAccessToken(token string) (*auth.Claims, error) {
 	if m.ValidateAccessTokenFunc != nil {
 		return m.ValidateAccessTokenFunc(token)
 	}
-	return &auth.Claims{UserID: 1}, nil
+	dummyUserUUID, _ := uuid.NewV7()
+	return &auth.Claims{UserID: dummyUserUUID}, nil
 }
 
 // ------------------- Tests -------------------
@@ -64,6 +67,8 @@ func (m *mockTokens) ValidateAccessToken(token string) (*auth.Claims, error) {
 func TestAuthenticateUser(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
+
+	dummyUserUUID, _ := uuid.NewV7()
 
 	authMock := &auth.AuthAdapter{
 		Passwords: &mockPasswords{
@@ -77,9 +82,9 @@ func TestAuthenticateUser(t *testing.T) {
 		},
 		Tokens: &mockTokens{
 			HashTokenFunc:           func(token string) string { return token },
-			GenerateAccessTokenFunc: func(userID int) (string, error) { return "token", nil },
+			GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "token", nil },
 			ValidateAccessTokenFunc: func(token string) (*auth.Claims, error) {
-				return &auth.Claims{UserID: 1}, nil
+				return &auth.Claims{UserID: dummyUserUUID}, nil
 			},
 		},
 	}
@@ -90,16 +95,16 @@ func TestAuthenticateUser(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "password_hash"}).AddRow(1, "hash")
+		rows := sqlmock.NewRows([]string{"id", "password_hash"}).AddRow(dummyUserUUID.String(), "hash")
 		mock.ExpectQuery(`SELECT id, password_hash FROM users WHERE email=\$1`).WithArgs("a@mail.com").WillReturnRows(rows)
 
 		userID, err := a.AuthenticateUser(context.Background(), "a@mail.com", "correct")
 		assert.NoError(t, err)
-		assert.Equal(t, 1, userID)
+		assert.Equal(t, dummyUserUUID, userID)
 	})
 
 	t.Run("wrong password", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "password_hash"}).AddRow(1, "hash")
+		rows := sqlmock.NewRows([]string{"id", "password_hash"}).AddRow(dummyUserUUID.String(), "hash")
 		mock.ExpectQuery(`SELECT id, password_hash FROM users WHERE email=\$1`).WithArgs("a@mail.com").WillReturnRows(rows)
 
 		_, err := a.AuthenticateUser(context.Background(), "a@mail.com", "wrong")
@@ -126,6 +131,9 @@ func TestGenerateRefreshToken(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 
+	dummyUserUUID, _ := uuid.NewV7()
+	dummyDeviceUuid, _ := uuid.NewV7()
+
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
 			HashTokenFunc: func(token string) string { return "hashed-" + token },
@@ -139,14 +147,14 @@ func TestGenerateRefreshToken(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		mock.ExpectExec(`INSERT INTO refresh_tokens .*`).WillReturnResult(sqlmock.NewResult(1, 1))
-		token, err := a.GenerateRefreshToken(context.Background(), 1, "device-uuid")
+		token, err := a.GenerateRefreshToken(context.Background(), dummyUserUUID, dummyDeviceUuid)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, token)
 	})
 
 	t.Run("exec fails", func(t *testing.T) {
 		mock.ExpectExec(`INSERT INTO refresh_tokens .*`).WillReturnError(errors.New("db error"))
-		_, err := a.GenerateRefreshToken(context.Background(), 1, "device-uuid")
+		_, err := a.GenerateRefreshToken(context.Background(), dummyUserUUID, dummyDeviceUuid)
 		assert.Error(t, err)
 	})
 }
@@ -154,6 +162,8 @@ func TestGenerateRefreshToken(t *testing.T) {
 func TestGetUserIDForRefreshToken(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
+
+	dummyUserUUID, _ := uuid.NewV7()
 
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
@@ -167,12 +177,12 @@ func TestGetUserIDForRefreshToken(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"user_id"}).AddRow(42)
+		rows := sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID)
 		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(rows)
 
 		id, err := a.getUserIDForRefreshToken(context.Background(), "rtoken")
 		assert.NoError(t, err)
-		assert.Equal(t, 42, id)
+		assert.Equal(t, dummyUserUUID, id)
 	})
 
 	t.Run("not found", func(t *testing.T) {
@@ -195,10 +205,12 @@ func TestRefreshAccessToken(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 
+	dummyUserUUID, _ := uuid.NewV7()
+
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
 			HashTokenFunc:           func(token string) string { return token },
-			GenerateAccessTokenFunc: func(userID int) (string, error) { return "new-access", nil },
+			GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "new-access", nil },
 		},
 	}
 
@@ -208,7 +220,7 @@ func TestRefreshAccessToken(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(10))
+		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
 		token, err := a.RefreshAccessToken(context.Background(), "rtoken")
 		assert.NoError(t, err)
 		assert.Equal(t, "new-access", token)
@@ -222,8 +234,8 @@ func TestRefreshAccessToken(t *testing.T) {
 	})
 
 	t.Run("token generation fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(1))
-		authMock.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID int) (string, error) { return "", errors.New("token error") }}
+		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		authMock.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "", errors.New("token error") }}
 		_, err := a.RefreshAccessToken(context.Background(), "rtoken")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "token error")
@@ -271,6 +283,8 @@ func TestRevokeAllRefreshTokens(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 
+	dummyUserUUID, _ := uuid.NewV7()
+
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
 			HashTokenFunc: func(token string) string { return token },
@@ -283,8 +297,8 @@ func TestRevokeAllRefreshTokens(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(1))
-		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(1).WillReturnResult(sqlmock.NewResult(0, 3))
+		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(dummyUserUUID).WillReturnResult(sqlmock.NewResult(0, 3))
 		err := a.RevokeAllRefreshTokens(context.Background(), "rtoken")
 		assert.NoError(t, err)
 	})
@@ -297,30 +311,21 @@ func TestRevokeAllRefreshTokens(t *testing.T) {
 	})
 
 	t.Run("exec fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(1))
-		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(1).WillReturnError(errors.New("exec error"))
+		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(dummyUserUUID).WillReturnError(errors.New("exec error"))
 		err := a.RevokeAllRefreshTokens(context.Background(), "rtoken")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "exec error")
 	})
 
 	t.Run("rows affected fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(1))
-		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(1).
+		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(dummyUserUUID).
 			WillReturnResult(sqlmock.NewErrorResult(errors.New("rows affected error")))
 		err := a.RevokeAllRefreshTokens(context.Background(), "rtoken")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "rows affected error")
 	})
-}
-
-func TestGenerateDeviceUUID(t *testing.T) {
-	a := &App{}
-	uuid1 := a.GenerateDeviceUUID()
-	uuid2 := a.GenerateDeviceUUID()
-	assert.NotEmpty(t, uuid1)
-	assert.NotEmpty(t, uuid2)
-	assert.NotEqual(t, uuid1, uuid2)
 }
 
 func TestCreateUser(t *testing.T) {
@@ -339,18 +344,32 @@ func TestCreateUser(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		mock.ExpectQuery(`INSERT INTO users .* RETURNING id, public_id`).WithArgs("a@mail.com", "hashed-Abc123!@").
-			WillReturnRows(sqlmock.NewRows([]string{"id", "public_id"}).AddRow(1, "pub-1"))
+		mock.ExpectBegin()
 
-		pubID, err := a.CreateUser(context.Background(), &CreateUserRequest{Email: "a@mail.com", Password: "Abc123!@"})
+		mock.ExpectExec("INSERT INTO users").
+			WithArgs(sqlmock.AnyArg(), "a@mail.com", "hashed-Abc123!@").
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		mock.ExpectExec("INSERT INTO user_details").
+			WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		mock.ExpectCommit()
+
+		userID, err := a.CreateUser(context.Background(), &CreateUserRequest{Email: "a@mail.com", Password: "Abc123!@"})
+
 		assert.NoError(t, err)
-		assert.Equal(t, "pub-1", pubID)
+		assert.NotEqual(t, uuid.Nil, userID)
+
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("there were unfulfilled expectations: %s", err)
+		}
 	})
 
 	t.Run("invalid password", func(t *testing.T) {
 		_, err := a.CreateUser(context.Background(), &CreateUserRequest{Email: "a@mail.com", Password: "short"})
 		assert.Error(t, err)
-		assert.Equal(t, ErrPasswordInvalidFormat, err)
+		assert.Equal(t, fmt.Errorf("could not validate password: %w", ErrPasswordInvalidFormat), err)
 	})
 
 	t.Run("hashing fails", func(t *testing.T) {
@@ -359,18 +378,24 @@ func TestCreateUser(t *testing.T) {
 		}}
 		_, err := a.CreateUser(context.Background(), &CreateUserRequest{Email: "a@mail.com", Password: "Abc123!@"})
 		assert.Error(t, err)
-		assert.EqualError(t, err, "hash error")
+		assert.EqualError(t, err, fmt.Sprintf("could not hash password: %s", "hash error"))
 	})
 
 	t.Run("db insert fails", func(t *testing.T) {
 		a.Auth.Passwords = &mockPasswords{HashPasswordSecureFunc: func(p string) (string, error) {
 			return "hashed-Abc123!@", nil
 		}}
-		mock.ExpectQuery(`INSERT INTO users .* RETURNING id, public_id`).WithArgs("a@mail.com", "hashed-Abc123!@").
+
+		mock.ExpectBegin()
+
+		mock.ExpectExec("INSERT INTO users").
+			WithArgs(sqlmock.AnyArg(), "a@mail.com", "hashed-Abc123!@").
 			WillReturnError(errors.New("db insert error"))
+
 		_, err := a.CreateUser(context.Background(), &CreateUserRequest{Email: "a@mail.com", Password: "Abc123!@"})
+
 		assert.Error(t, err)
-		assert.EqualError(t, err, "db insert error")
+		assert.Contains(t, err.Error(), "insert user failed: db insert error")
 	})
 }
 
@@ -389,7 +414,8 @@ func TestValidatePassword(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		err := a.validatePassword(tt.password)
+		isValid, err := a.validatePassword(tt.password)
+		assert.Equal(t, tt.wantError, !isValid)
 		if tt.wantError {
 			assert.Error(t, err)
 		} else {
@@ -399,10 +425,11 @@ func TestValidatePassword(t *testing.T) {
 }
 
 func TestAccessTokenMethods(t *testing.T) {
+	dummyUserUUID, _ := uuid.NewV7()
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
-			GenerateAccessTokenFunc: func(userID int) (string, error) { return "token", nil },
-			ValidateAccessTokenFunc: func(token string) (*auth.Claims, error) { return &auth.Claims{UserID: 1}, nil },
+			GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "token", nil },
+			ValidateAccessTokenFunc: func(token string) (*auth.Claims, error) { return &auth.Claims{UserID: dummyUserUUID}, nil },
 		},
 	}
 
@@ -411,7 +438,7 @@ func TestAccessTokenMethods(t *testing.T) {
 	}
 
 	t.Run("GenerateAccessToken success", func(t *testing.T) {
-		token, err := a.GenerateAccessToken(1)
+		token, err := a.GenerateAccessToken(dummyUserUUID)
 		assert.NoError(t, err)
 		assert.Equal(t, "token", token)
 	})
@@ -419,12 +446,12 @@ func TestAccessTokenMethods(t *testing.T) {
 	t.Run("ValidateAccessToken success", func(t *testing.T) {
 		claims, err := a.ValidateAccessToken("token")
 		assert.NoError(t, err)
-		assert.Equal(t, 1, claims.UserID)
+		assert.Equal(t, dummyUserUUID, claims.UserID)
 	})
 
 	t.Run("GenerateAccessToken error", func(t *testing.T) {
-		a.Auth.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID int) (string, error) { return "", errors.New("generate error") }}
-		_, err := a.GenerateAccessToken(1)
+		a.Auth.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "", errors.New("generate error") }}
+		_, err := a.GenerateAccessToken(dummyUserUUID)
 		assert.Error(t, err)
 		assert.EqualError(t, err, "generate error")
 	})

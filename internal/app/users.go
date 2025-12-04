@@ -35,13 +35,32 @@ var ErrUnmappedKey = errors.New("unmapped key")
 
 func (a *App) GetUserByID(ctx context.Context, userID uuid.UUID) (*User, error) {
 	var user User
+	var firstNameNull sql.NullString
+	var lastNameNull sql.NullString
+
 	log.Printf("%s", userID.String())
-	err := a.DB.QueryRowContext(ctx, `SELECT U.id, U.email, UD.first_name, UD.last_name FROM Users U JOIN User_Details UD ON U.id = UD.user_id WHERE U.id = $1`, userID).
-		Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName)
+	err := a.DB.QueryRowContext(
+		ctx,
+		`SELECT U.id, U.email, UD.first_name, UD.last_name
+		FROM Users U
+		LEFT JOIN User_Details UD ON U.id = UD.user_id
+		WHERE U.id = $1`,
+		userID,
+	).Scan(&user.ID, &user.Email, &firstNameNull, &lastNameNull)
 	if err != nil {
 		log.Printf("GetUserByID - %s", err.Error())
 		return nil, err
 	}
+
+	user.FirstName = firstNameNull.String
+	if !firstNameNull.Valid {
+		user.FirstName = ""
+	}
+	user.LastName = lastNameNull.String
+	if !lastNameNull.Valid {
+		user.LastName = ""
+	}
+
 	return &user, nil
 }
 

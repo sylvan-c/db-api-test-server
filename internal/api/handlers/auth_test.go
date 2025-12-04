@@ -72,7 +72,7 @@ func (a *mockAuthService) ValidateAccessToken(tokenStr string) (*auth.Claims, er
 
 func TestLoginHandler(t *testing.T) {
 	dummyDeviceUuid, _ := uuid.NewV7()
-	dummyUserUuid, _ := uuid.NewV7()
+	dummyUserUUID, _ := uuid.NewV7()
 	tests := []struct {
 		name           string
 		body           string
@@ -86,7 +86,7 @@ func TestLoginHandler(t *testing.T) {
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
-						return dummyUserUuid, nil
+						return dummyUserUUID, nil
 					},
 					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "valid-access-token", nil
@@ -99,7 +99,7 @@ func TestLoginHandler(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID uuid.UUID, returnedUserID uuid.UUID) {
 				assert.Equal(t, dummyDeviceUuid, usedUUID)
-				assert.Equal(t, dummyUserUuid, returnedUserID)
+				assert.Equal(t, dummyUserUUID, returnedUserID)
 				var body map[string]string
 				err := json.Unmarshal(w.Body.Bytes(), &body)
 				assert.NoError(t, err)
@@ -113,7 +113,7 @@ func TestLoginHandler(t *testing.T) {
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
-						return dummyUserUuid, nil
+						return dummyUserUUID, nil
 					},
 					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "valid-access-token", nil
@@ -126,7 +126,7 @@ func TestLoginHandler(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			verify: func(t *testing.T, w *httptest.ResponseRecorder, usedUUID uuid.UUID, returnedUserID uuid.UUID) {
 				assert.NotEqual(t, dummyDeviceUuid, usedUUID)
-				assert.Equal(t, dummyUserUuid, returnedUserID)
+				assert.Equal(t, dummyUserUUID, returnedUserID)
 				var body map[string]string
 				err := json.Unmarshal(w.Body.Bytes(), &body)
 				assert.NoError(t, err)
@@ -170,7 +170,7 @@ func TestLoginHandler(t *testing.T) {
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
-						return dummyUserUuid, nil
+						return dummyUserUUID, nil
 					},
 					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "", errors.New("token error")
@@ -188,7 +188,7 @@ func TestLoginHandler(t *testing.T) {
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
-						return dummyUserUuid, nil
+						return dummyUserUUID, nil
 					},
 					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
 						return "access", nil
