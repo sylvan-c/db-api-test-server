@@ -23,7 +23,7 @@ type AuthAdapter struct {
 // Token stuff
 
 type TokenGenerator interface {
-	GenerateAccessToken(userID uuid.UUID) (string, error)
+	GenerateAccessToken(userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
 	ValidateAccessToken(tokenStr string) (*Claims, error)
 	HashToken(token string) string
 }
@@ -37,14 +37,16 @@ func NewJWTAuth(secret string) TokenGenerator {
 }
 
 type Claims struct {
-	UserID uuid.UUID `json:"userID"`
+	UserID     uuid.UUID `json:"userID"`
+	DeviceUUID uuid.UUID `json:"deviceUUID"`
 	jwt.RegisteredClaims
 }
 
-func (j *JWTAuth) GenerateAccessToken(userID uuid.UUID) (string, error) {
+func (j *JWTAuth) GenerateAccessToken(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		UserID: userID,
+		UserID:     userID,
+		DeviceUUID: deviceUUID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(now),

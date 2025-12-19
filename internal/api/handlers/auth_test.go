@@ -20,12 +20,11 @@ import (
 type mockAuthService struct {
 	AuthenticateUserFunc       func(ctx context.Context, email, password string) (uuid.UUID, error)
 	GenerateRefreshTokenFunc   func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
-	RefreshAccessTokenFunc     func(ctx context.Context, refreshToken string) (string, error)
+	RefreshAccessTokenFunc     func(ctx context.Context, refreshToken string) (map[string]string, error)
 	RevokeRefreshTokenFunc     func(ctx context.Context, refreshToken string) error
 	RevokeAllRefreshTokensFunc func(ctx context.Context, refreshToken string) error
-	GenerateDeviceUUIDFunc     func() string
 	CreateUserFunc             func(ctx context.Context, req *app.CreateUserRequest) (uuid.UUID, error)
-	GenerateAccessTokenFunc    func(userID uuid.UUID) (string, error)
+	GenerateAccessTokenFunc    func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
 	ValidateAccessTokenFunc    func(tokenStr string) (*auth.Claims, error)
 }
 
@@ -37,7 +36,7 @@ func (a *mockAuthService) GenerateRefreshToken(ctx context.Context, userID uuid.
 	return a.GenerateRefreshTokenFunc(ctx, userID, deviceUUID)
 }
 
-func (a *mockAuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (string, error) {
+func (a *mockAuthService) RefreshAccessToken(ctx context.Context, refreshToken string) (map[string]string, error) {
 	return a.RefreshAccessTokenFunc(ctx, refreshToken)
 }
 
@@ -49,19 +48,12 @@ func (a *mockAuthService) RevokeAllRefreshTokens(ctx context.Context, refreshTok
 	return a.RevokeAllRefreshTokensFunc(ctx, refreshToken)
 }
 
-func (a *mockAuthService) GenerateDeviceUUID() string {
-	if a.GenerateDeviceUUIDFunc == nil {
-		return "default-uuid"
-	}
-	return a.GenerateDeviceUUIDFunc()
-}
-
 func (a *mockAuthService) CreateUser(ctx context.Context, req *app.CreateUserRequest) (uuid.UUID, error) {
 	return a.CreateUserFunc(ctx, req)
 }
 
-func (a *mockAuthService) GenerateAccessToken(userID uuid.UUID) (string, error) {
-	return a.GenerateAccessTokenFunc(userID)
+func (a *mockAuthService) GenerateAccessToken(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
+	return a.GenerateAccessTokenFunc(userID, deviceUUID)
 }
 
 func (a *mockAuthService) ValidateAccessToken(tokenStr string) (*auth.Claims, error) {
@@ -88,7 +80,7 @@ func TestLoginHandler(t *testing.T) {
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
 						return dummyUserUUID, nil
 					},
-					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "valid-access-token", nil
 					},
 					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
@@ -115,7 +107,7 @@ func TestLoginHandler(t *testing.T) {
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
 						return dummyUserUUID, nil
 					},
-					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "valid-access-token", nil
 					},
 					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
@@ -172,7 +164,7 @@ func TestLoginHandler(t *testing.T) {
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
 						return dummyUserUUID, nil
 					},
-					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "", errors.New("token error")
 					},
 					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
@@ -190,7 +182,7 @@ func TestLoginHandler(t *testing.T) {
 					AuthenticateUserFunc: func(ctx context.Context, email, password string) (uuid.UUID, error) {
 						return dummyUserUUID, nil
 					},
-					GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) {
+					GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 						return "access", nil
 					},
 					GenerateRefreshTokenFunc: func(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
@@ -236,20 +228,27 @@ func TestLoginHandler(t *testing.T) {
 // ------------------- Refresh Access Token Tests -------------------
 
 func TestRefreshAccessTokenHandler(t *testing.T) {
+	dummyDeviceUUID, _ := uuid.NewV7()
 	tests := []struct {
 		name           string
 		body           string
+		deviceUUID     uuid.UUID
 		expectedStatus int
 		mockSetup      func() *mockAuthService
 		verify         func(t *testing.T, w *httptest.ResponseRecorder)
 	}{
 		{
-			name: "pass",
-			body: `{"refreshToken":"valid-token"}`,
+			name:       "pass",
+			body:       `{"refreshToken":"valid-token"}`,
+			deviceUUID: dummyDeviceUUID,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					RefreshAccessTokenFunc: func(ctx context.Context, token string) (string, error) {
-						return "new-token", nil
+					RefreshAccessTokenFunc: func(ctx context.Context, token string) (map[string]string, error) {
+						tokens := map[string]string{
+							"accessToken":  "new-token",
+							"refreshToken": "new-refresh-token",
+						}
+						return tokens, nil
 					},
 				}
 			},
@@ -278,8 +277,8 @@ func TestRefreshAccessTokenHandler(t *testing.T) {
 			body: `{"refreshToken":"bad-token"}`,
 			mockSetup: func() *mockAuthService {
 				return &mockAuthService{
-					RefreshAccessTokenFunc: func(ctx context.Context, token string) (string, error) {
-						return "", fmt.Errorf("failed to generate token")
+					RefreshAccessTokenFunc: func(ctx context.Context, token string) (map[string]string, error) {
+						return nil, fmt.Errorf("failed to generate token")
 					},
 				}
 			},

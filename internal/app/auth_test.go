@@ -36,7 +36,7 @@ func (m *mockPasswords) HashPasswordSecure(password string) (string, error) {
 
 type mockTokens struct {
 	HashTokenFunc           func(token string) string
-	GenerateAccessTokenFunc func(userID uuid.UUID) (string, error)
+	GenerateAccessTokenFunc func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
 	ValidateAccessTokenFunc func(token string) (*auth.Claims, error)
 }
 
@@ -47,9 +47,9 @@ func (m *mockTokens) HashToken(token string) string {
 	return token
 }
 
-func (m *mockTokens) GenerateAccessToken(userID uuid.UUID) (string, error) {
+func (m *mockTokens) GenerateAccessToken(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
 	if m.GenerateAccessTokenFunc != nil {
-		return m.GenerateAccessTokenFunc(userID)
+		return m.GenerateAccessTokenFunc(userID, deviceUUID)
 	}
 	return "access-token", nil
 }
@@ -82,7 +82,7 @@ func TestAuthenticateUser(t *testing.T) {
 		},
 		Tokens: &mockTokens{
 			HashTokenFunc:           func(token string) string { return token },
-			GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "token", nil },
+			GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) { return "token", nil },
 			ValidateAccessTokenFunc: func(token string) (*auth.Claims, error) {
 				return &auth.Claims{UserID: dummyUserUUID}, nil
 			},
@@ -159,11 +159,12 @@ func TestGenerateRefreshToken(t *testing.T) {
 	})
 }
 
-func TestGetUserIDForRefreshToken(t *testing.T) {
+func TestGetRefreshTokenDetails(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 
 	dummyUserUUID, _ := uuid.NewV7()
+	dummyDeviceUUID, _ := uuid.NewV7()
 
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
@@ -177,25 +178,26 @@ func TestGetUserIDForRefreshToken(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID)
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(rows)
+		rows := sqlmock.NewRows([]string{"user_id", "device_uuid"}).AddRow(dummyUserUUID, dummyDeviceUUID)
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(rows)
 
-		id, err := a.getUserIDForRefreshToken(context.Background(), "rtoken")
+		id, deviceUUID, err := a.getRefreshTokenDetails(context.Background(), "rtoken")
 		assert.NoError(t, err)
 		assert.Equal(t, dummyUserUUID, id)
+		assert.Equal(t, dummyDeviceUUID, deviceUUID)
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("badtoken").WillReturnError(sql.ErrNoRows)
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("badtoken").WillReturnError(sql.ErrNoRows)
 
-		_, err := a.getUserIDForRefreshToken(context.Background(), "badtoken")
+		_, _, err := a.getRefreshTokenDetails(context.Background(), "badtoken")
 		assert.ErrorIs(t, err, ErrInvalidRefreshToken)
 	})
 
 	t.Run("db error", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnError(errors.New("db fail"))
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnError(errors.New("db fail"))
 
-		_, err := a.getUserIDForRefreshToken(context.Background(), "rtoken")
+		_, _, err := a.getRefreshTokenDetails(context.Background(), "rtoken")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "db fail")
 	})
@@ -206,11 +208,12 @@ func TestRefreshAccessToken(t *testing.T) {
 	defer db.Close()
 
 	dummyUserUUID, _ := uuid.NewV7()
+	dummyDeviceUUID, _ := uuid.NewV7()
 
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
 			HashTokenFunc:           func(token string) string { return token },
-			GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "new-access", nil },
+			GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) { return "new-access", nil },
 		},
 	}
 
@@ -220,22 +223,25 @@ func TestRefreshAccessToken(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id", "device_uuid"}).AddRow(dummyUserUUID, dummyDeviceUUID))
+		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE token`).WithArgs("rtoken").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`INSERT INTO refresh_tokens .*`).WillReturnResult(sqlmock.NewResult(1, 1))
 		token, err := a.RefreshAccessToken(context.Background(), "rtoken")
 		assert.NoError(t, err)
-		assert.Equal(t, "new-access", token)
+		assert.Equal(t, "new-access", token["accessToken"])
+		assert.IsType(t, map[string]string{}, token)
 	})
 
 	t.Run("get user id fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnError(errors.New("db error"))
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnError(errors.New("db error"))
 		_, err := a.RefreshAccessToken(context.Background(), "rtoken")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "db error")
 	})
 
 	t.Run("token generation fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
-		authMock.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "", errors.New("token error") }}
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id", "device_uuid"}).AddRow(dummyUserUUID, dummyDeviceUUID))
+		authMock.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) { return "", errors.New("token error") }}
 		_, err := a.RefreshAccessToken(context.Background(), "rtoken")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "token error")
@@ -297,21 +303,21 @@ func TestRevokeAllRefreshTokens(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id", "device_uuid"}).AddRow(dummyUserUUID, uuid.Nil))
 		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(dummyUserUUID).WillReturnResult(sqlmock.NewResult(0, 3))
 		err := a.RevokeAllRefreshTokens(context.Background(), "rtoken")
 		assert.NoError(t, err)
 	})
 
 	t.Run("get user id fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnError(errors.New("db query error"))
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnError(errors.New("db query error"))
 		err := a.RevokeAllRefreshTokens(context.Background(), "rtoken")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "db query error")
 	})
 
 	t.Run("exec fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id", "device_uuid"}).AddRow(dummyUserUUID, uuid.Nil))
 		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(dummyUserUUID).WillReturnError(errors.New("exec error"))
 		err := a.RevokeAllRefreshTokens(context.Background(), "rtoken")
 		assert.Error(t, err)
@@ -319,7 +325,7 @@ func TestRevokeAllRefreshTokens(t *testing.T) {
 	})
 
 	t.Run("rows affected fails", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT user_id FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(dummyUserUUID))
+		mock.ExpectQuery(`SELECT user_id, device_uuid FROM refresh_tokens .*`).WithArgs("rtoken").WillReturnRows(sqlmock.NewRows([]string{"user_id", "device_uuid"}).AddRow(dummyUserUUID, uuid.Nil))
 		mock.ExpectExec(`UPDATE refresh_tokens SET revoked = true WHERE user_id`).WithArgs(dummyUserUUID).
 			WillReturnResult(sqlmock.NewErrorResult(errors.New("rows affected error")))
 		err := a.RevokeAllRefreshTokens(context.Background(), "rtoken")
@@ -426,9 +432,10 @@ func TestValidatePassword(t *testing.T) {
 
 func TestAccessTokenMethods(t *testing.T) {
 	dummyUserUUID, _ := uuid.NewV7()
+	dummyDeviceUUID, _ := uuid.NewV7()
 	authMock := &auth.AuthAdapter{
 		Tokens: &mockTokens{
-			GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "token", nil },
+			GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) { return "token", nil },
 			ValidateAccessTokenFunc: func(token string) (*auth.Claims, error) { return &auth.Claims{UserID: dummyUserUUID}, nil },
 		},
 	}
@@ -438,7 +445,7 @@ func TestAccessTokenMethods(t *testing.T) {
 	}
 
 	t.Run("GenerateAccessToken success", func(t *testing.T) {
-		token, err := a.GenerateAccessToken(dummyUserUUID)
+		token, err := a.GenerateAccessToken(dummyUserUUID, dummyDeviceUUID)
 		assert.NoError(t, err)
 		assert.Equal(t, "token", token)
 	})
@@ -450,8 +457,8 @@ func TestAccessTokenMethods(t *testing.T) {
 	})
 
 	t.Run("GenerateAccessToken error", func(t *testing.T) {
-		a.Auth.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID uuid.UUID) (string, error) { return "", errors.New("generate error") }}
-		_, err := a.GenerateAccessToken(dummyUserUUID)
+		a.Auth.Tokens = &mockTokens{GenerateAccessTokenFunc: func(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) { return "", errors.New("generate error") }}
+		_, err := a.GenerateAccessToken(dummyUserUUID, dummyDeviceUUID)
 		assert.Error(t, err)
 		assert.EqualError(t, err, "generate error")
 	})
