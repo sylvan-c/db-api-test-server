@@ -17,11 +17,11 @@ import (
 type AuthService interface {
 	AuthenticateUser(ctx context.Context, email, password string) (uuid.UUID, error)
 	GenerateRefreshToken(ctx context.Context, userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
-	RefreshAccessToken(ctx context.Context, refreshToken string) (string, error)
+	RefreshAccessToken(ctx context.Context, refreshToken string) (map[string]string, error)
 	RevokeRefreshToken(ctx context.Context, refreshToken string) error
 	RevokeAllRefreshTokens(ctx context.Context, refreshToken string) error
 	CreateUser(ctx context.Context, req *CreateUserRequest) (uuid.UUID, error)
-	GenerateAccessToken(userID uuid.UUID) (string, error)
+	GenerateAccessToken(userID uuid.UUID, deviceUUID uuid.UUID) (string, error)
 	ValidateAccessToken(tokenStr string) (*auth.Claims, error)
 }
 
@@ -80,28 +80,40 @@ func (a *App) GenerateRefreshToken(ctx context.Context, userID uuid.UUID, device
 	return token, nil
 }
 
-func (a *App) getUserIDForRefreshToken(ctx context.Context, refreshToken string) (uuid.UUID, error) {
+func (a *App) getRefreshTokenDetails(ctx context.Context, refreshToken string) (uuid.UUID, uuid.UUID, error) {
 	var userID uuid.UUID
-	err := a.DB.QueryRowContext(ctx, `SELECT user_id FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.Auth.Tokens.HashToken(refreshToken)).
-		Scan(&userID)
+	var deviceUUID uuid.UUID
+	err := a.DB.QueryRowContext(ctx, `SELECT user_id, device_uuid FROM refresh_tokens WHERE token = $1 and not revoked and expiry_tst > now()`, a.Auth.Tokens.HashToken(refreshToken)).
+		Scan(&userID, &deviceUUID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return uuid.Nil, ErrInvalidRefreshToken
+		return uuid.Nil, uuid.Nil, ErrInvalidRefreshToken
 	} else if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, uuid.Nil, err
 	}
-	return userID, nil
+	return userID, deviceUUID, nil
 }
 
-func (a *App) RefreshAccessToken(ctx context.Context, refreshToken string) (string, error) {
-	userID, err := a.getUserIDForRefreshToken(ctx, refreshToken)
+func (a *App) RefreshAccessToken(ctx context.Context, refreshToken string) (map[string]string, error) {
+	userID, deviceUUID, err := a.getRefreshTokenDetails(ctx, refreshToken)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	accessToken, err := a.Auth.Tokens.GenerateAccessToken(userID)
+	accessToken, err := a.Auth.Tokens.GenerateAccessToken(userID, deviceUUID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return accessToken, nil
+	if err := a.RevokeRefreshToken(ctx, refreshToken); err != nil {
+		return nil, fmt.Errorf("failed to revoke refresh token: %w", err)
+	}
+	newRefreshToken, err := a.GenerateRefreshToken(ctx, userID, deviceUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+	tokenStruct := map[string]string{
+		"accessToken":  accessToken,
+		"refreshToken": newRefreshToken,
+	}
+	return tokenStruct, nil
 }
 
 func (a *App) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
@@ -118,7 +130,7 @@ func (a *App) RevokeRefreshToken(ctx context.Context, refreshToken string) error
 }
 
 func (a *App) RevokeAllRefreshTokens(ctx context.Context, refreshToken string) error {
-	userID, err := a.getUserIDForRefreshToken(ctx, refreshToken)
+	userID, _, err := a.getRefreshTokenDetails(ctx, refreshToken)
 	if err != nil {
 		return err
 	}
@@ -224,8 +236,8 @@ func (a *App) validatePassword(password string) (bool, error) {
 
 //auth methods
 
-func (a *App) GenerateAccessToken(userID uuid.UUID) (string, error) {
-	return a.Auth.Tokens.GenerateAccessToken(userID)
+func (a *App) GenerateAccessToken(userID uuid.UUID, deviceUUID uuid.UUID) (string, error) {
+	return a.Auth.Tokens.GenerateAccessToken(userID, deviceUUID)
 }
 
 func (a *App) ValidateAccessToken(tokenStr string) (*auth.Claims, error) {

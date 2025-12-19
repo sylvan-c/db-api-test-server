@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"db-api-test-server/internal/app"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := h.Auth.GenerateAccessToken(userID)
+	accessToken, err := h.Auth.GenerateAccessToken(userID, deviceUUID)
 	if err != nil {
 		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
 		return
@@ -94,14 +95,14 @@ func (h *AuthHandler) RefreshAccessToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	accessToken, err := h.Auth.RefreshAccessToken(ctx, req.RefreshToken)
+	tokens, err := h.Auth.RefreshAccessToken(ctx, req.RefreshToken)
 	if err != nil {
 		log.Printf("%v", err.Error())
-		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
+		http.Error(w, "failed to refresh tokens", http.StatusInternalServerError)
 		return
 	}
 
-	respondJSON(w, loginResponse{AccessToken: accessToken}, http.StatusOK)
+	respondJSON(w, tokens, http.StatusOK)
 }
 
 func (h *AuthHandler) LogOut(w http.ResponseWriter, r *http.Request) {
